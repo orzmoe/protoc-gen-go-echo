@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package test.v1;
+
+option go_package = "example.com/test/v1;testv1";
+
+message PingRequest {
+  string value = 1;
+}
+
+message PingReply {
+  string value = 1;
+}
+
+service PingService {
+  // @summary 健康检查
+  rpc Ping(PingRequest) returns (PingReply);
+}

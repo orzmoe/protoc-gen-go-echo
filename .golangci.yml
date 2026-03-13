@@ -1,0 +1,37 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gosimple
+    - gocritic
+    - revive
+    - misspell
+    - gofmt
+    - goimports
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        disabled: true # protoc 插件导出符号由模板决定，不强制注释
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - dupSubExpr
+      - equalFold
+      - sloppyLen
+      - unnecessaryBlock
+
+issues:
+  exclude-rules:
+    # 测试文件允许更长的函数和更多 magic number
+    - path: _test\.go
+      linters:
+        - gocritic
+        - revive

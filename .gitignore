@@ -1,0 +1,7 @@
+# 编译产物
+protoc-gen-go-echo
+protoc-gen-go-echo.exe
+
+# 测试覆盖率输出
+cover.out
+*.coverprofile
