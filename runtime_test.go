@@ -118,6 +118,24 @@ func (allowAllPerm) CheckAllPermissions(_ echo.Context, _ []string) error { retu
 func (allowAllPerm) CheckAnyPermission(_ echo.Context, _ []string) error { return nil }
 func (allowAllPerm) CheckAuth(_ echo.Context) error { return nil }
 
+type validatorStub struct {
+	err error
+}
+
+func (v validatorStub) Validate(any) error { return v.err }
+
+func setRuntimeFlags(t *testing.T, isDev, detailed bool) {
+	t.Helper()
+	oldDev := runtimeServiceIsDev
+	oldDetailed := runtimeServiceIsDetailedValidation
+	runtimeServiceIsDev = isDev
+	runtimeServiceIsDetailedValidation = detailed
+	t.Cleanup(func() {
+		runtimeServiceIsDev = oldDev
+		runtimeServiceIsDetailedValidation = oldDetailed
+	})
+}
+
 func setupEcho(srv RuntimeServiceHTTPServer) *echo.Echo {
 	e := echo.New()
 	g := e.Group("")
@@ -174,6 +192,95 @@ func TestRuntime_GRPCPermissionDeniedMapsTo403(t *testing.T) {
 
 	if rec.Code != 403 {
 		t.Fatalf("gRPC PermissionDenied 应映射到 HTTP 403，实际: %d", rec.Code)
+	}
+}
+
+func TestRuntime_ErrorDetailHiddenOutsideDevelopment(t *testing.T) {
+	setRuntimeFlags(t, false, false)
+	srv := &fakeServer{pingErr: errors.New("database unavailable")}
+	e := setupEcho(srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/ping", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != 500 {
+		t.Fatalf("普通错误应返回 500，实际: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析响应 JSON 失败: %v", err)
+	}
+	for _, key := range []string{"error_detail", "stack_trace", "path", "method"} {
+		if _, ok := body[key]; ok {
+			t.Fatalf("非开发模式不应返回 %s，实际 body: %v", key, body)
+		}
+	}
+}
+
+func TestRuntime_ErrorDetailVisibleInDevelopment(t *testing.T) {
+	setRuntimeFlags(t, true, false)
+	srv := &fakeServer{pingErr: errors.New("database unavailable")}
+	e := setupEcho(srv)
+
+	req := httptest.NewRequest(http.MethodPost, "/ping", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != 500 {
+		t.Fatalf("开发模式普通错误应返回 500，实际: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析响应 JSON 失败: %v", err)
+	}
+	if detail, _ := body["error_detail"].(string); detail != "database unavailable" {
+		t.Fatalf("开发模式应返回 error_detail，实际: %v", body["error_detail"])
+	}
+	if stack, _ := body["stack_trace"].(string); stack == "" {
+		t.Fatalf("开发模式应返回 stack_trace，实际 body: %v", body)
+	}
+	if path, _ := body["path"].(string); path != "/ping" {
+		t.Fatalf("开发模式应返回 path=/ping，实际: %v", body["path"])
+	}
+	if method, _ := body["method"].(string); method != http.MethodPost {
+		t.Fatalf("开发模式应返回 method=POST，实际: %v", body["method"])
+	}
+}
+
+func TestRuntime_DetailedValidationDoesNotExposePathOrMethod(t *testing.T) {
+	setRuntimeFlags(t, false, true)
+	srv := &fakeServer{pingReply: &PingReply{Value: "pong"}}
+	e := setupEcho(srv)
+	e.Validator = validatorStub{err: mockValidationErrors{{field: "Name", tag: "required"}}}
+
+	req := httptest.NewRequest(http.MethodPost, "/ping", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != 400 {
+		t.Fatalf("详细校验模式应返回 400，实际: %d, body: %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析响应 JSON 失败: %v", err)
+	}
+	if detail, _ := body["error_detail"].(string); detail == "" {
+		t.Fatalf("详细校验模式应返回 error_detail，实际 body: %v", body)
+	}
+	if _, ok := body["validation_errors"]; !ok {
+		t.Fatalf("详细校验模式应返回 validation_errors，实际 body: %v", body)
+	}
+	for _, key := range []string{"path", "method"} {
+		if _, ok := body[key]; ok {
+			t.Fatalf("详细校验模式不应返回 %s，实际 body: %v", key, body)
+		}
 	}
 }
 
@@ -437,13 +544,13 @@ func TestRuntime_ParseValidationErrors_MultiFieldSlice(t *testing.T) {
 	if len(result) != 3 {
 		t.Fatalf("应提取 3 个字段错误，实际: %d, result: %v", len(result), result)
 	}
-	if result[0]["field"] != "Name" || result[0]["tag"] != "required" {
+	if result[0].Field != "Name" || result[0].Tag != "required" {
 		t.Fatalf("第 1 个字段错误不匹配，实际: %v", result[0])
 	}
-	if result[1]["field"] != "Email" || result[1]["tag"] != "email" {
+	if result[1].Field != "Email" || result[1].Tag != "email" {
 		t.Fatalf("第 2 个字段错误不匹配，实际: %v", result[1])
 	}
-	if result[2]["field"] != "Age" || result[2]["tag"] != "gte" || result[2]["param"] != "18" {
+	if result[2].Field != "Age" || result[2].Tag != "gte" || result[2].Param != "18" {
 		t.Fatalf("第 3 个字段错误不匹配，实际: %v", result[2])
 	}
 }
@@ -455,7 +562,7 @@ func TestRuntime_ParseValidationErrors_SingleFieldError(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("应提取 1 个字段错误，实际: %d, result: %v", len(result), result)
 	}
-	if result[0]["field"] != "Token" || result[0]["tag"] != "required" {
+	if result[0].Field != "Token" || result[0].Tag != "required" {
 		t.Fatalf("字段错误不匹配，实际: %v", result[0])
 	}
 }
@@ -472,7 +579,7 @@ func TestRuntime_ParseValidationErrors_UnwrapMultipleErrors(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("应提取 2 个字段错误，实际: %d, result: %v", len(result), result)
 	}
-	if result[0]["field"] != "A" || result[1]["field"] != "B" {
+	if result[0].Field != "A" || result[1].Field != "B" {
 		t.Fatalf("字段错误不匹配，实际: %v", result)
 	}
 }

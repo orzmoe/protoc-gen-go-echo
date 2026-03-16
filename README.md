@@ -171,14 +171,20 @@ rpc RedirectToSSO(Req) returns (RedirectResp) {
 
 | 变量名 | 值 | 作用 |
 |--------|------|------|
-| `ENV` / `ENVIRONMENT` | `development`/`dev`/`local` | 开发模式：错误响应包含详细堆栈 |
+| `ENV` / `ENVIRONMENT` | `development`/`dev`/`local` | 开发模式：错误响应额外包含请求路径和方法 |
 | `ENV` / `ENVIRONMENT` | `production`/`prod` | 生产模式：Cookie 添加 `Secure` 标志 |
 | `DETAILED_VALIDATION` | `true` | 参数错误响应包含详细校验信息 |
 | `VERBOSE_SUCCESS` | `true` | 成功响应附加时间戳和 request_id（仅开发模式） |
 
 ## 错误处理
 
-生成的默认错误响应支持两种错误类型识别，按优先级：
+生成的默认错误响应在**开发模式**下会额外包含 `error_detail`（错误消息）、`stack_trace`（`%+v` 格式化的完整错误链）、`path` 和 `method`，便于本地排查问题。生产环境默认不向客户端暴露这些调试字段。
+
+参数错误响应在开发模式下会包含 `error_detail`、`validation_errors`、`path` 和 `method`；当设置 `DETAILED_VALIDATION=true` 时，生产环境也会返回 `error_detail` 和 `validation_errors`，但不会额外暴露 `path` 和 `method`。
+
+错误响应同时会将原始 `error` 写入 `ctx.Set("_error", err)`，供下游中间件（如请求日志）消费。
+
+默认错误响应支持两种错误类型识别，按优先级：
 
 1. **业务错误接口**：实现 `HTTPCode() int` / `Message() string` / `Code() int` 的错误类型
 2. **gRPC status**：自动将 `google.golang.org/grpc/status` 错误映射为对应 HTTP 状态码

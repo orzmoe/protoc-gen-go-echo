@@ -33,6 +33,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 		"errors",
 		"fmt",
 		"http",
+		"mime",
 		"os",
 		"reflect",
 		"strings",
@@ -47,13 +48,17 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 		name := svc.GoName
 		lowerName := strings.ToLower(name[:1]) + name[1:]
 		reservedAliases = append(reservedAliases,
-			name,                          // 服务结构体，如 AuthService
-			name+"HTTPServer",             // 接口
-			name+"PermissionChecker",      // 权限检查器接口
-			name+"ResponseWrapper",        // 响应包装器接口
-			name+"PermissionMeta",         // 权限元信息结构
-			lowerName+"EchoCtxKey",        // context key 类型
-			lowerName+"ResponseHeaderKey", // response header key 类型
+			name,                            // 服务结构体，如 AuthService
+			name+"HTTPServer",               // 接口
+			name+"PermissionChecker",        // 权限检查器接口
+			name+"ResponseWrapper",          // 响应包装器接口
+			name+"PermissionMeta",           // 权限元信息结构
+			lowerName+"RequestStateKey",     // 每请求状态 context key
+			lowerName+"RequestState",        // 每请求状态结构
+			lowerName+"ErrorResponse",       // 错误响应结构
+			lowerName+"ParamsErrorResponse", // 参数错误响应结构
+			lowerName+"ValidationErrorItem", // 校验错误项结构
+			lowerName+"SuccessResponse",     // 成功响应结构
 		)
 	}
 	imports := newImportManager(

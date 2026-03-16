@@ -81,6 +81,63 @@ type {{$.Name}} struct {
 
 type default{{$.Name}}Resp struct{}
 
+// ── 响应结构体（替代 map[string]any 以减少分配和 JSON 编码开销） ──
+
+// {{$.LowerName}}ErrorResponse 错误响应的固定结构。
+type {{$.LowerName}}ErrorResponse struct {
+	Code        int    `json:"code"`
+	Msg         string `json:"msg"`
+	Timestamp   int64  `json:"timestamp"`
+	TraceID     string `json:"trace_id,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
+	ErrorDetail string `json:"error_detail,omitempty"`
+	StackTrace  string `json:"stack_trace,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Method      string `json:"method,omitempty"`
+}
+
+// {{$.LowerName}}ParamsErrorResponse 参数错误响应的固定结构。
+type {{$.LowerName}}ParamsErrorResponse struct {
+	Code             int                                  `json:"code"`
+	Msg              string                               `json:"msg"`
+	Timestamp        int64                                `json:"timestamp"`
+	TraceID          string                               `json:"trace_id,omitempty"`
+	RequestID        string                               `json:"request_id,omitempty"`
+	ErrorDetail      string                               `json:"error_detail,omitempty"`
+	ValidationErrors []{{$.LowerName}}ValidationErrorItem `json:"validation_errors,omitempty"`
+	Path             string                               `json:"path,omitempty"`
+	Method           string                               `json:"method,omitempty"`
+}
+
+// {{$.LowerName}}ValidationErrorItem 单个字段校验错误。
+type {{$.LowerName}}ValidationErrorItem struct {
+	Field string `json:"field"`
+	Tag   string `json:"tag"`
+	Param string `json:"param"`
+}
+
+// {{$.LowerName}}SuccessResponse wrapped 模式的成功响应结构。
+type {{$.LowerName}}SuccessResponse struct {
+	Code      int    `json:"code"`
+	Msg       string `json:"msg"`
+	Data      any    `json:"data"`
+	Timestamp int64  `json:"timestamp,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+}
+
+// ── 每请求状态（合并 response header + upload echo.Context，减少 context.WithValue 调用） ──
+
+// {{$.LowerName}}RequestState 聚合每个请求的上下文状态。
+// responseHeaders 在 handler 中预创建，业务层通过 Set{{$.Name}}ResponseHeader 写入。
+type {{$.LowerName}}RequestState struct {
+	responseHeaders map[string][]string
+	echoCtx         echo.Context // 仅 upload 场景赋值
+}
+
+type {{$.LowerName}}RequestStateKey struct{}
+
+// ── 错误响应 ──
+
 func (resp default{{$.Name}}Resp) Error(ctx echo.Context, err error) error {
 	code := 500
 	status := 500
@@ -120,29 +177,24 @@ func (resp default{{$.Name}}Resp) buildErrorResponse(ctx echo.Context, status, c
 		ctx.Set("_error", err)
 	}
 
-	// 基本 3 字段 + trace_id + request_id + 开发模式字段（error_detail/stack_trace/path/method）
-	responseData := make(map[string]any, 8)
-	responseData["code"] = code
-	responseData["msg"] = msg
-	responseData["timestamp"] = time.Now().Unix()
-
-	if traceID := get{{$.Name}}TraceID(ctx); traceID != "" {
-		responseData["trace_id"] = traceID
-	}
-	if requestID := get{{$.Name}}RequestID(ctx); requestID != "" {
-		responseData["request_id"] = requestID
+	r := {{$.LowerName}}ErrorResponse{
+		Code:      code,
+		Msg:       msg,
+		Timestamp: time.Now().Unix(),
+		TraceID:   get{{$.Name}}TraceID(ctx),
+		RequestID: get{{$.Name}}RequestID(ctx),
 	}
 
 	if is{{$.Name}}Development() {
 		if err != nil {
-			responseData["error_detail"] = err.Error()
-			responseData["stack_trace"] = fmt.Sprintf("%+v", err)
+			r.ErrorDetail = err.Error()
+			r.StackTrace = fmt.Sprintf("%+v", err)
 		}
-		responseData["path"] = ctx.Request().URL.Path
-		responseData["method"] = ctx.Request().Method
+		r.Path = ctx.Request().URL.Path
+		r.Method = ctx.Request().Method
 	}
 
-	return ctx.JSON(status, responseData)
+	return ctx.JSON(status, &r)
 }
 
 // {{$.LowerName}}IsDev 在进程启动时缓存环境判断结果，避免每次请求都调用 os.Getenv。
@@ -159,32 +211,26 @@ func is{{$.Name}}Development() bool {
 }
 
 func (resp default{{$.Name}}Resp) ParamsError(ctx echo.Context, err error) error {
-	// 基本 3 字段 + trace_id + request_id + 详细校验字段（error_detail/validation_errors/path/method）
-	responseData := make(map[string]any, 8)
-	responseData["code"] = 400
-	responseData["msg"] = "参数错误"
-	responseData["timestamp"] = time.Now().Unix()
-
-	if traceID := get{{$.Name}}TraceID(ctx); traceID != "" {
-		responseData["trace_id"] = traceID
-	}
-	if requestID := get{{$.Name}}RequestID(ctx); requestID != "" {
-		responseData["request_id"] = requestID
+	r := {{$.LowerName}}ParamsErrorResponse{
+		Code:      400,
+		Msg:       "参数错误",
+		Timestamp: time.Now().Unix(),
+		TraceID:   get{{$.Name}}TraceID(ctx),
+		RequestID: get{{$.Name}}RequestID(ctx),
 	}
 
 	if is{{$.Name}}Development() || is{{$.Name}}DetailedValidation() {
 		if err != nil {
-			responseData["error_detail"] = err.Error()
-
-			if validationErrors := parse{{$.Name}}ValidationErrors(err); len(validationErrors) > 0 {
-				responseData["validation_errors"] = validationErrors
-			}
+			r.ErrorDetail = err.Error()
+			r.ValidationErrors = parse{{$.Name}}ValidationErrors(err)
 		}
-		responseData["path"] = ctx.Request().URL.Path
-		responseData["method"] = ctx.Request().Method
+	}
+	if is{{$.Name}}Development() {
+		r.Path = ctx.Request().URL.Path
+		r.Method = ctx.Request().Method
 	}
 
-	return ctx.JSON(400, responseData)
+	return ctx.JSON(400, &r)
 }
 
 // {{$.LowerName}}IsDetailedValidation 在进程启动时缓存，避免每次请求都调用 os.Getenv。
@@ -194,12 +240,12 @@ func is{{$.Name}}DetailedValidation() bool {
 	return {{$.LowerName}}IsDetailedValidation
 }
 
-func parse{{$.Name}}ValidationErrors(err error) []map[string]string {
+func parse{{$.Name}}ValidationErrors(err error) []{{$.LowerName}}ValidationErrorItem {
 	if err == nil {
 		return nil
 	}
 
-	var validationErrors []map[string]string
+	var validationErrors []{{$.LowerName}}ValidationErrorItem
 
 	type fieldError interface {
 		Field() string
@@ -209,10 +255,10 @@ func parse{{$.Name}}ValidationErrors(err error) []map[string]string {
 
 	// 提取单个字段错误信息的 helper
 	appendFieldError := func(fe fieldError) {
-		validationErrors = append(validationErrors, map[string]string{
-			"field": fe.Field(),
-			"tag":   fe.Tag(),
-			"param": fe.Param(),
+		validationErrors = append(validationErrors, {{$.LowerName}}ValidationErrorItem{
+			Field: fe.Field(),
+			Tag:   fe.Tag(),
+			Param: fe.Param(),
 		})
 	}
 
@@ -257,21 +303,18 @@ func parse{{$.Name}}ValidationErrors(err error) []map[string]string {
 
 func (resp default{{$.Name}}Resp) Success(ctx echo.Context, data any) error {
 	{{if $.UseWrappedResponse}}
-	// 基本 3 字段 + 可选 timestamp + request_id
-	responseData := make(map[string]any, 5)
-	responseData["code"] = 200
-	responseData["msg"] = "成功"
-	// data 字段赋值（等价于 "data": data）
-	responseData["data"] = data
-
-	if is{{$.Name}}Development() && is{{$.Name}}VerboseSuccess() {
-		responseData["timestamp"] = time.Now().Unix()
-		if requestID := get{{$.Name}}RequestID(ctx); requestID != "" {
-			responseData["request_id"] = requestID
-		}
+	r := {{$.LowerName}}SuccessResponse{
+		Code: 200,
+		Msg:  "成功",
+		Data: data,
 	}
 
-	return ctx.JSON(200, responseData)
+	if is{{$.Name}}Development() && is{{$.Name}}VerboseSuccess() {
+		r.Timestamp = time.Now().Unix()
+		r.RequestID = get{{$.Name}}RequestID(ctx)
+	}
+
+	return ctx.JSON(200, &r)
 	{{else}}
 	return ctx.JSON(200, data)
 	{{end}}
@@ -347,19 +390,13 @@ func {{$.LowerName}}GRPCCodeToHTTPStatus(c grpcCodes.Code) int {
 	}
 }
 
-type {{$.LowerName}}EchoCtxKey struct{}
-
 // Get{{$.Name}}EchoContext 从 context 中获取 echo.Context（仅 upload 场景会注入值）。
 func Get{{$.Name}}EchoContext(ctx context.Context) (echo.Context, bool) {
-	v := ctx.Value({{$.LowerName}}EchoCtxKey{})
-	if v == nil {
-		return nil, false
+	if state, ok := ctx.Value({{$.LowerName}}RequestStateKey{}).(*{{$.LowerName}}RequestState); ok && state.echoCtx != nil {
+		return state.echoCtx, true
 	}
-	echoCtx, ok := v.(echo.Context)
-	return echoCtx, ok
+	return nil, false
 }
-
-type {{$.LowerName}}ResponseHeaderKey struct{}
 
 // {{$.LowerName}}SkipHeaders 定义不应透传到 gRPC metadata 的 HTTP 头。
 // 包含 hop-by-hop 头和敏感头，避免语义污染和信息泄露。
@@ -377,9 +414,10 @@ var {{$.LowerName}}SkipHeaders = map[string]struct{}{
 }
 
 // Set{{$.Name}}ResponseHeader 在业务层设置将要写回 HTTP 响应的 header。
+// 注意：此函数不是并发安全的，不应在多个 goroutine 中同时调用。
 func Set{{$.Name}}ResponseHeader(ctx context.Context, key, value string) {
-	if headers, ok := ctx.Value({{$.LowerName}}ResponseHeaderKey{}).(map[string][]string); ok {
-		headers[key] = append(headers[key], value)
+	if state, ok := ctx.Value({{$.LowerName}}RequestStateKey{}).(*{{$.LowerName}}RequestState); ok {
+		state.responseHeaders[key] = append(state.responseHeaders[key], value)
 	}
 }
 
@@ -457,30 +495,41 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	}
 	{{end}}
 
-	md := metadata.New(nil)
-	for k, v := range ctx.Request().Header {
+	req := ctx.Request()
+	hdr := req.Header
+	md := make(metadata.MD, len(hdr)+2)
+	var hasXRealIP, hasUserAgent bool
+	for k, v := range hdr {
 		if _, skip := {{$.LowerName}}SkipHeaders[k]; skip {
 			continue
 		}
+		switch k {
+		case "X-Real-Ip":
+			hasXRealIP = true
+		case "User-Agent":
+			hasUserAgent = true
+		}
 		md.Set(k, v...)
 	}
-	if clientIP := ctx.RealIP(); clientIP != "" {
-		if len(md.Get("x-real-ip")) == 0 {
+	if !hasXRealIP {
+		if clientIP := ctx.RealIP(); clientIP != "" {
 			md.Set("x-real-ip", clientIP)
 		}
 	}
-	if userAgent := ctx.Request().UserAgent(); userAgent != "" {
-		if len(md.Get("user-agent")) == 0 {
-			md.Set("user-agent", userAgent)
+	if !hasUserAgent {
+		if ua := req.UserAgent(); ua != "" {
+			md.Set("user-agent", ua)
 		}
 	}
 
-	responseHeaders := make(map[string][]string)
-	newCtx := context.WithValue(ctx.Request().Context(), {{$.LowerName}}ResponseHeaderKey{}, responseHeaders)
-	newCtx = metadata.NewIncomingContext(newCtx, md)
+	state := &{{$.LowerName}}RequestState{
+		responseHeaders: make(map[string][]string),
+	}
 	{{if .IsUpload}}
-	newCtx = context.WithValue(newCtx, {{$.LowerName}}EchoCtxKey{}, ctx)
+	state.echoCtx = ctx
 	{{end}}
+	newCtx := context.WithValue(req.Context(), {{$.LowerName}}RequestStateKey{}, state)
+	newCtx = metadata.NewIncomingContext(newCtx, md)
 
 	out, err := s.server.{{.Name}}(newCtx, &in)
 	if err != nil {
@@ -490,8 +539,8 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 		return s.resp.Error(ctx, errors.New("service returned nil response without error"))
 	}
 
-	if headers, ok := newCtx.Value({{$.LowerName}}ResponseHeaderKey{}).(map[string][]string); ok {
-		for key, values := range headers {
+	if len(state.responseHeaders) > 0 {
+		for key, values := range state.responseHeaders {
 			for _, value := range values {
 				ctx.Response().Header().Add(key, value)
 			}

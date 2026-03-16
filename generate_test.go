@@ -7,8 +7,11 @@ import (
 
 func TestGenerate_ResponseStyleWrapped(t *testing.T) {
 	generated := runGenerate(t, []string{"paths=source_relative", "response_style=wrapped"})
-	if !strings.Contains(generated, `responseData["data"] = data`) {
-		t.Fatalf("wrapped 风格应生成 data 包装字段，实际输出:\n%s", generated)
+	if !strings.Contains(generated, "SuccessResponse{") {
+		t.Fatalf("wrapped 风格应使用 SuccessResponse 结构体，实际输出:\n%s", generated)
+	}
+	if !strings.Contains(generated, "Data: data,") {
+		t.Fatalf("wrapped 风格应设置 Data 字段，实际输出:\n%s", generated)
 	}
 }
 
