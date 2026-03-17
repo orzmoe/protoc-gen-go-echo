@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"net/http"
+	"strings"
+	"sync"
 
 	echo "github.com/labstack/echo/v4"
 	"google.golang.org/grpc/metadata"
@@ -9,6 +12,7 @@ import (
 
 // requestState 聚合每个请求的上下文状态（unexported，不暴露给用户）。
 type requestState struct {
+	mu              sync.Mutex
 	responseHeaders map[string][]string
 	echoCtx         echo.Context // 仅 upload 场景赋值
 }
@@ -29,6 +33,7 @@ var skipHeaders = map[string]struct{}{
 	"Upgrade":             {},
 	"Host":                {},
 	"Content-Length":      {},
+	"X-Real-Ip":           {},
 }
 
 // BuildIncomingContext 将 HTTP 请求头转发为 gRPC metadata，
@@ -39,30 +44,50 @@ var skipHeaders = map[string]struct{}{
 func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
 	// 防重入：如果 context 中已有 state，复用而非覆盖
 	reqCtx := ctx.Request().Context()
-	if _, ok := reqCtx.Value(requestStateKey{}).(*requestState); ok {
+	if existing, ok := reqCtx.Value(requestStateKey{}).(*requestState); ok {
+		// 补写 echoCtx：首次非 upload 调用后，后续 upload 调用需要补充
+		if isUpload {
+			existing.mu.Lock()
+			if existing.echoCtx == nil {
+				existing.echoCtx = ctx
+			}
+			existing.mu.Unlock()
+		}
 		return reqCtx
 	}
 
 	req := ctx.Request()
 	hdr := req.Header
 	md := make(metadata.MD, len(hdr)+2)
-	var hasXRealIP, hasUserAgent bool
+	var hasUserAgent bool
+	dynamicSkip := make(map[string]struct{})
+	if connValues := hdr.Values("Connection"); len(connValues) > 0 {
+		for _, connValue := range connValues {
+			for _, token := range strings.Split(connValue, ",") {
+				token = strings.TrimSpace(token)
+				if token == "" {
+					continue
+				}
+				dynamicSkip[http.CanonicalHeaderKey(token)] = struct{}{}
+			}
+		}
+	}
 	for k, v := range hdr {
-		if _, skip := skipHeaders[k]; skip {
+		canonicalKey := http.CanonicalHeaderKey(k)
+		if _, skip := skipHeaders[canonicalKey]; skip {
 			continue
 		}
-		switch k {
-		case "X-Real-Ip":
-			hasXRealIP = true
+		if _, skip := dynamicSkip[canonicalKey]; skip {
+			continue
+		}
+		switch canonicalKey {
 		case "User-Agent":
 			hasUserAgent = true
 		}
 		md.Set(k, v...)
 	}
-	if !hasXRealIP {
-		if clientIP := ctx.RealIP(); clientIP != "" {
-			md.Set("x-real-ip", clientIP)
-		}
+	if clientIP := ctx.RealIP(); clientIP != "" {
+		md.Set("x-real-ip", clientIP)
 	}
 	if !hasUserAgent {
 		if ua := req.UserAgent(); ua != "" {
@@ -70,9 +95,15 @@ func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
 		}
 	}
 
-	state := &requestState{
-		responseHeaders: make(map[string][]string),
+	if existingMD, ok := metadata.FromIncomingContext(reqCtx); ok {
+		for k, v := range existingMD {
+			if _, exists := md[k]; !exists {
+				md[k] = v
+			}
+		}
 	}
+
+	state := &requestState{}
 	if isUpload {
 		state.echoCtx = ctx
 	}
@@ -86,10 +117,20 @@ func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
 // reqCtx 应为 [BuildIncomingContext] 返回的 context。
 func WriteResponseHeaders(echoCtx echo.Context, reqCtx context.Context) {
 	state, ok := reqCtx.Value(requestStateKey{}).(*requestState)
-	if !ok || len(state.responseHeaders) == 0 {
+	if !ok {
 		return
 	}
+	state.mu.Lock()
+	if len(state.responseHeaders) == 0 {
+		state.mu.Unlock()
+		return
+	}
+	headers := make(map[string][]string, len(state.responseHeaders))
 	for key, values := range state.responseHeaders {
+		headers[key] = append([]string(nil), values...)
+	}
+	state.mu.Unlock()
+	for key, values := range headers {
 		for _, value := range values {
 			echoCtx.Response().Header().Add(key, value)
 		}
@@ -98,19 +139,27 @@ func WriteResponseHeaders(echoCtx echo.Context, reqCtx context.Context) {
 
 // SetResponseHeader 在业务层设置将要写回 HTTP 响应的 header。
 // ctx 应为经过 [BuildIncomingContext] 处理后的 context。
-//
-// 注意：此函数不是并发安全的，不应在多个 goroutine 中同时调用。
 func SetResponseHeader(ctx context.Context, key, value string) {
 	if state, ok := ctx.Value(requestStateKey{}).(*requestState); ok {
+		state.mu.Lock()
+		if state.responseHeaders == nil {
+			state.responseHeaders = make(map[string][]string)
+		}
 		state.responseHeaders[key] = append(state.responseHeaders[key], value)
+		state.mu.Unlock()
 	}
 }
 
 // GetEchoContext 从 context 中获取 echo.Context。
 // 仅在 upload 场景下（[BuildIncomingContext] 的 isUpload 为 true 时）会返回有效值。
 func GetEchoContext(ctx context.Context) (echo.Context, bool) {
-	if state, ok := ctx.Value(requestStateKey{}).(*requestState); ok && state.echoCtx != nil {
-		return state.echoCtx, true
+	if state, ok := ctx.Value(requestStateKey{}).(*requestState); ok {
+		state.mu.Lock()
+		echoCtx := state.echoCtx
+		state.mu.Unlock()
+		if echoCtx != nil {
+			return echoCtx, true
+		}
 	}
 	return nil, false
 }

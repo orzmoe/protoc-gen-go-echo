@@ -36,12 +36,14 @@ type PermissionChecker interface {
 
 // PermissionMeta 描述单个路由的权限元信息，用于权限管理后台同步。
 type PermissionMeta struct {
-	Method      string
-	Path        string
-	Handler     string
-	Permission  string
-	IsPublic    bool
-	IsAuthOnly  bool
-	Summary     string
-	Description string
+	Method         string
+	Path           string
+	Handler        string
+	Permission     string
+	Permissions    []string
+	PermissionMode string
+	IsPublic       bool
+	IsAuthOnly     bool
+	Summary        string
+	Description    string
 }

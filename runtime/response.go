@@ -14,15 +14,15 @@ import (
 
 // DefaultErrorResponse 错误响应的固定结构。
 type DefaultErrorResponse struct {
-	Code        int    `json:"code"`
-	Msg         string `json:"msg"`
-	Timestamp   int64  `json:"timestamp"`
-	TraceID     string `json:"trace_id,omitempty"`
-	RequestID   string `json:"request_id,omitempty"`
-	ErrorDetail string `json:"error_detail,omitempty"`
-	StackTrace  string `json:"stack_trace,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Method      string `json:"method,omitempty"`
+	Code         int    `json:"code"`
+	Msg          string `json:"msg"`
+	Timestamp    int64  `json:"timestamp"`
+	TraceID      string `json:"trace_id,omitempty"`
+	RequestID    string `json:"request_id,omitempty"`
+	ErrorDetail  string `json:"error_detail,omitempty"`
+	ErrorVerbose string `json:"error_verbose,omitempty"`
+	Path         string `json:"path,omitempty"`
+	Method       string `json:"method,omitempty"`
 }
 
 // DefaultParamsErrorResponse 参数错误响应的固定结构。
@@ -127,7 +127,7 @@ func (DefaultWrappedResp) buildErrorResponse(ctx echo.Context, status, code int,
 	if IsDevelopment() {
 		if err != nil {
 			r.ErrorDetail = err.Error()
-			r.StackTrace = fmt.Sprintf("%+v", err)
+			r.ErrorVerbose = fmt.Sprintf("%+v", err)
 		}
 		r.Path = ctx.Request().URL.Path
 		r.Method = ctx.Request().Method

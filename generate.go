@@ -30,7 +30,6 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	reservedAliases := []string{
 		"context",
 		"errors",
-		"http",
 		"mime",
 		"echo",
 		"emptypb",
@@ -74,13 +73,9 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	g.P()
 
 	// 检查特殊响应模式，决定是否需要额外 import
-	needsNetHTTP := false
 	needsMime := false
 	for _, rs := range renderedServices {
 		for _, m := range rs.Data.Methods {
-			if m.IsAuthResponse {
-				needsNetHTTP = true
-			}
 			if m.IsFileDownload {
 				needsMime = true
 			}
@@ -90,11 +85,9 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	g.P("import (")
 	g.P(`context "context"`)
 	g.P(`errors "errors"`)
+	g.P(`"slices"`)
 	if needsMime {
 		g.P(`"mime"`)
-	}
-	if needsNetHTTP {
-		g.P(`"net/http"`)
 	}
 	g.P("echo ", `"github.com/labstack/echo/v4"`)
 	if needsEmptyPb {

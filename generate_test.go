@@ -173,13 +173,13 @@ func TestGenerate_UsesGoPackageAliasForExternalTypes(t *testing.T) {
 
 func TestGenerate_HTTPBodyEmptyUsesPathAndQueryBinding(t *testing.T) {
 	generated := runGenerateProto(t, testBodyQueryOnlyProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "s.binder.BindPathParams(ctx, &in)") {
+	if !strings.Contains(generated, "runtime.BindPathParams(ctx, &in)") {
 		t.Fatalf("body 为空时应绑定 path 参数，实际输出:\n%s", generated)
 	}
-	if !strings.Contains(generated, "s.binder.BindQueryParams(ctx, &in)") {
+	if !strings.Contains(generated, "runtime.BindQueryParams(ctx, &in)") {
 		t.Fatalf("body 为空时应绑定 query 参数，实际输出:\n%s", generated)
 	}
-	if strings.Contains(generated, "s.binder.BindBody(ctx, &in)") {
+	if strings.Contains(generated, "runtime.BindBody(ctx, &in)") {
 		t.Fatalf("body 为空时不应绑定请求体，实际输出:\n%s", generated)
 	}
 	if strings.Contains(generated, "ctx.Bind(&in)") {
@@ -189,23 +189,23 @@ func TestGenerate_HTTPBodyEmptyUsesPathAndQueryBinding(t *testing.T) {
 
 func TestGenerate_HTTPBodyStarUsesPathAndBodyBinding(t *testing.T) {
 	generated := runGenerateProto(t, testBodyFullProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "s.binder.BindPathParams(ctx, &in)") {
+	if !strings.Contains(generated, "runtime.BindPathParams(ctx, &in)") {
 		t.Fatalf("body=* 时应绑定 path 参数，实际输出:\n%s", generated)
 	}
-	if !strings.Contains(generated, "s.binder.BindBody(ctx, &in)") {
+	if !strings.Contains(generated, "runtime.BindBody(ctx, &in)") {
 		t.Fatalf("body=* 时应绑定请求体，实际输出:\n%s", generated)
 	}
-	if strings.Contains(generated, "s.binder.BindQueryParams(ctx, &in)") {
+	if strings.Contains(generated, "runtime.BindQueryParams(ctx, &in)") {
 		t.Fatalf("body=* 时不应绑定 query 参数，实际输出:\n%s", generated)
 	}
 }
 
 func TestGenerate_PermissionMetaUsesUniqueHandlerName(t *testing.T) {
 	generated := runGenerateProto(t, testAdditionalBindingsProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, `Handler:     "Get_0"`) {
+	if !strings.Contains(generated, `Handler:    "Get_0"`) {
 		t.Fatalf("PermissionMeta 应使用唯一 HandlerName，实际输出:\n%s", generated)
 	}
-	if !strings.Contains(generated, `Handler:     "Get_1"`) {
+	if !strings.Contains(generated, `Handler:    "Get_1"`) {
 		t.Fatalf("additional_bindings 也应生成唯一 HandlerName，实际输出:\n%s", generated)
 	}
 }
@@ -514,7 +514,7 @@ func TestGenerate_PermMixedEmptyItemsFiltered(t *testing.T) {
 		t.Fatalf("permissions 混合空项过滤后应生成 %s，实际输出:\n%s", expectedArray, generated)
 	}
 	// 验证 PermissionMeta 中的 Permission 展示也是规范化后的值
-	if !strings.Contains(generated, `Permission:  "perm.a,perm.b"`) {
+	if !strings.Contains(generated, `Permission: "perm.a,perm.b"`) {
 		t.Fatalf("PermissionMeta 的 Permission 展示应为规范化后的 perm.a,perm.b，实际输出:\n%s", generated)
 	}
 }
@@ -529,7 +529,7 @@ func TestGenerate_AnyPermMixedEmptyItemsFiltered(t *testing.T) {
 		t.Fatalf("any_permission 混合空项过滤后应生成 %s，实际输出:\n%s", expectedArray, generated)
 	}
 	// 验证 PermissionMeta 中的 Permission 展示也是规范化后的值
-	if !strings.Contains(generated, `Permission:  "perm.x,perm.y"`) {
+	if !strings.Contains(generated, `Permission: "perm.x,perm.y"`) {
 		t.Fatalf("PermissionMeta 的 Permission 展示应为规范化后的 perm.x,perm.y，实际输出:\n%s", generated)
 	}
 }
@@ -546,29 +546,13 @@ func TestGenerate_DefaultEmptyPathReportsError(t *testing.T) {
 
 func TestGenerate_AuthCookieSecureUsesIsProduction(t *testing.T) {
 	generated := runGenerateProto(t, testAuthCookieProto, []string{"paths=source_relative"})
-	// 验证通过 runtime.IsProduction 判断 secure
-	if !strings.Contains(generated, "runtime.IsProduction()") {
-		t.Fatalf("auth cookie 生成代码应调用 runtime.IsProduction()，实际输出:\n%s", generated)
+	// auth cookie 逻辑已封装到 runtime.SetAuthCookie
+	if !strings.Contains(generated, "runtime.SetAuthCookie(ctx, out.AccessToken, int64(out.ExpiresIn))") {
+		t.Fatalf("auth cookie 应调用 runtime.SetAuthCookie，实际输出:\n%s", generated)
 	}
-	// 验证使用 http.Cookie 结构化设置（而非手工拼接字符串）
-	if !strings.Contains(generated, "http.Cookie") {
-		t.Fatalf("auth cookie 应使用 http.Cookie 结构化设置，实际输出:\n%s", generated)
-	}
-	// 验证 Secure 标志由 runtime.IsProduction 直接赋值
-	if !strings.Contains(generated, "authCookie.Secure = runtime.IsProduction()") {
-		t.Fatalf("auth cookie Secure 应通过 runtime.IsProduction() 直接赋值，实际输出:\n%s", generated)
-	}
-	// 验证使用 ctx.SetCookie 而非手工拼 Set-Cookie 头
-	if !strings.Contains(generated, "ctx.SetCookie(authCookie)") {
-		t.Fatalf("auth cookie 应使用 ctx.SetCookie 设置，实际输出:\n%s", generated)
-	}
-	// 验证 SameSite 使用标准常量
-	if !strings.Contains(generated, "http.SameSiteLaxMode") {
-		t.Fatalf("auth cookie SameSite 应使用 http.SameSiteLaxMode 常量，实际输出:\n%s", generated)
-	}
-	// 验证 net/http import 存在
-	if !strings.Contains(generated, `"net/http"`) {
-		t.Fatalf("auth cookie 需要 net/http import，实际输出:\n%s", generated)
+	// 不应再 import net/http（cookie 逻辑在 runtime 内部）
+	if strings.Contains(generated, `"net/http"`) {
+		t.Fatalf("auth cookie 场景不应再 import net/http，实际输出:\n%s", generated)
 	}
 }
 
@@ -638,14 +622,14 @@ message CreateUserReply {
 	if !strings.Contains(code, "in.User = new(") {
 		t.Error("body field 绑定应包含 new() 初始化")
 	}
-	if !strings.Contains(code, "s.binder.BindBody(ctx, in.User)") {
-		t.Error("body field 绑定应调用 s.binder.BindBody(ctx, in.User)")
+	if !strings.Contains(code, "runtime.BindBody(ctx, in.User)") {
+		t.Error("body field 绑定应调用 runtime.BindBody(ctx, in.User)")
 	}
 	// 验证仍有 path/query 绑定
-	if !strings.Contains(code, "s.binder.BindPathParams(ctx, &in)") {
+	if !strings.Contains(code, "runtime.BindPathParams(ctx, &in)") {
 		t.Error("body field 绑定应包含 BindPathParams")
 	}
-	if !strings.Contains(code, "s.binder.BindQueryParams(ctx, &in)") {
+	if !strings.Contains(code, "runtime.BindQueryParams(ctx, &in)") {
 		t.Error("body field 绑定应包含 BindQueryParams")
 	}
 }
@@ -810,9 +794,13 @@ func TestGenerate_HopByHopHeaderFilterPresent(t *testing.T) {
 	}
 }
 
-func TestGenerate_SetResponseHeaderHelperPresent(t *testing.T) {
+func TestGenerate_NoPerServiceWrappers(t *testing.T) {
 	generated := runGenerateProto(t, testStableOutputProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "runtime.SetResponseHeader") {
-		t.Fatalf("SetXxxResponseHeader helper 应委托 runtime.SetResponseHeader，实际输出:\n%s", generated)
+	// per-service wrapper 已移除，用户直接调 runtime.SetResponseHeader / runtime.GetEchoContext
+	if strings.Contains(generated, "func SetPingServiceResponseHeader") {
+		t.Fatalf("不应再生成 per-service SetXxxResponseHeader wrapper，实际输出:\n%s", generated)
+	}
+	if strings.Contains(generated, "func GetPingServiceEchoContext") {
+		t.Fatalf("不应再生成 per-service GetXxxEchoContext wrapper，实际输出:\n%s", generated)
 	}
 }

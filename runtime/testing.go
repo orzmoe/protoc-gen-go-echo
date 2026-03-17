@@ -5,14 +5,15 @@ package runtime
 //
 // 示例:
 //
-//	restore := runtime.SetEnvOverrides(true, false)
+//	restore := runtime.SetEnvOverrides(true, false, false, false)
 //	defer restore()
-func SetEnvOverrides(development, detailedValidation bool) (restore func()) {
-	oldDev, oldDetailed := isDev, isDetailedValidation
+func SetEnvOverrides(development, production, detailedValidation, verboseSuccess bool) (restore func()) {
+	old := [4]bool{isDev, isProduction, isDetailedValidation, isVerboseSuccess}
 	isDev = development
+	isProduction = production
 	isDetailedValidation = detailedValidation
+	isVerboseSuccess = verboseSuccess
 	return func() {
-		isDev = oldDev
-		isDetailedValidation = oldDetailed
+		isDev, isProduction, isDetailedValidation, isVerboseSuccess = old[0], old[1], old[2], old[3]
 	}
 }

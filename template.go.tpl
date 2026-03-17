@@ -5,6 +5,8 @@ type {{ $.InterfaceName }} interface {
 {{end}}
 }
 
+// Register{{$.InterfaceName}} 注册 HTTP 路由。
+// wrappers 为可选参数，最多接受一个自定义 [runtime.ResponseWrapper]，超过一个将被忽略。
 func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, perm runtime.PermissionChecker, wrappers ...runtime.ResponseWrapper) {
 	if e == nil {
 		panic("Register{{$.InterfaceName}}: echo.Group must not be nil")
@@ -29,37 +31,51 @@ func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, per
 		router: e,
 		resp:   resp,
 		perm:   perm,
-		binder: new(echo.DefaultBinder),
 	}
 	s.RegisterService()
 }
 
-func Get{{$.Name}}PermissionMetas() []runtime.PermissionMeta {
-	return []runtime.PermissionMeta{
+var {{$.LowerName}}PermissionMetas = []runtime.PermissionMeta{
 {{range .Methods}}
-		{
-			Method:      {{printf "%q" .Method}},
-			Path:        {{printf "%q" .Path}},
-			Handler:     {{printf "%q" .HandlerName}},
-			Permission:  {{printf "%q" .PermissionDisplay}},
-			IsPublic:    {{.IsPublic}},
-			IsAuthOnly:  {{.IsAuthOnly}},
-			Summary:     {{printf "%q" .Summary}},
-			Description: {{printf "%q" .Description}},
-		},
+	{
+		Method:      {{printf "%q" .Method}},
+		Path:        {{printf "%q" .Path}},
+		Handler:     {{printf "%q" .HandlerName}},
+		Permission:  {{printf "%q" .PermissionDisplay}},
+		{{if .IsPublic}}
+		PermissionMode: "public",
+		{{else if .IsAuthOnly}}
+		PermissionMode: "auth_only",
+		{{else if .Permission}}
+		PermissionMode: "single",
+		Permissions:    []string{ {{printf "%q" .Permission}} },
+		{{else if .Permissions}}
+		PermissionMode: "all",
+		Permissions:    []string{ {{range $i, $v := .PermissionList}}{{if $i}}, {{end}}{{printf "%q" $v}}{{end}} },
+		{{else if .AnyPermission}}
+		PermissionMode: "any",
+		Permissions:    []string{ {{range $i, $v := .AnyPermissionList}}{{if $i}}, {{end}}{{printf "%q" $v}}{{end}} },
+		{{else}}
+		PermissionMode: "auth_only",
+		{{end}}
+		IsPublic:    {{.IsPublic}},
+		IsAuthOnly:  {{.IsAuthOnly}},
+		Summary:     {{printf "%q" .Summary}},
+		Description: {{printf "%q" .Description}},
+	},
 {{end}}
+}
+
+func Get{{$.Name}}PermissionMetas() []runtime.PermissionMeta {
+	src := {{$.LowerName}}PermissionMetas
+	dst := make([]runtime.PermissionMeta, len(src))
+	copy(dst, src)
+	for i := range dst {
+		if dst[i].Permissions != nil {
+			dst[i].Permissions = slices.Clone(dst[i].Permissions)
+		}
 	}
-}
-
-// Set{{$.Name}}ResponseHeader 在业务层设置将要写回 HTTP 响应的 header。
-// 注意：此函数不是并发安全的，不应在多个 goroutine 中同时调用。
-func Set{{$.Name}}ResponseHeader(ctx context.Context, key, value string) {
-	runtime.SetResponseHeader(ctx, key, value)
-}
-
-// Get{{$.Name}}EchoContext 从 context 中获取 echo.Context（仅 upload 场景会注入值）。
-func Get{{$.Name}}EchoContext(ctx context.Context) (echo.Context, bool) {
-	return runtime.GetEchoContext(ctx)
+	return dst
 }
 
 type {{$.Name}} struct {
@@ -67,7 +83,6 @@ type {{$.Name}} struct {
 	router *echo.Group
 	perm   runtime.PermissionChecker
 	resp   runtime.ResponseWrapper
-	binder *echo.DefaultBinder
 }
 
 {{range .Methods}}
@@ -75,23 +90,23 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	{{if not .IsPublic}}
 	{{if .IsAuthOnly}}
 	if err := s.perm.CheckAuth(ctx); err != nil {
-		return err
+		return s.resp.Error(ctx, err)
 	}
 	{{else if .Permission}}
 	if err := s.perm.CheckPermission(ctx, "{{.Permission}}"); err != nil {
-		return err
+		return s.resp.Error(ctx, err)
 	}
 	{{else if .Permissions}}
 	if err := s.perm.CheckAllPermissions(ctx, []string{ {{- range $index, $value := .PermissionList}}{{if $index}}, {{end}}{{printf "%q" $value}}{{end}} }); err != nil {
-		return err
+		return s.resp.Error(ctx, err)
 	}
 	{{else if .AnyPermission}}
 	if err := s.perm.CheckAnyPermission(ctx, []string{ {{- range $index, $value := .AnyPermissionList}}{{if $index}}, {{end}}{{printf "%q" $value}}{{end}} }); err != nil {
-		return err
+		return s.resp.Error(ctx, err)
 	}
 	{{else}}
 	if err := s.perm.CheckAuth(ctx); err != nil {
-		return err
+		return s.resp.Error(ctx, err)
 	}
 	{{end}}
 	{{end}}
@@ -107,32 +122,32 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	}
 	{{else if .UsesPathQueryBinding}}
 	// google.api.http 未指定 body 时，只绑定 path/query，不读取请求体。
-	if err := s.binder.BindPathParams(ctx, &in); err != nil {
+	if err := runtime.BindPathParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := s.binder.BindQueryParams(ctx, &in); err != nil {
+	if err := runtime.BindQueryParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{else if .UsesPathBodyBinding}}
 	// google.api.http body="*" 时，除路径参数外，其余字段来自请求体。
-	if err := s.binder.BindPathParams(ctx, &in); err != nil {
+	if err := runtime.BindPathParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := s.binder.BindBody(ctx, &in); err != nil {
+	if err := runtime.BindBody(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{else if .UsesPathQueryBodyFieldBinding}}
 	// google.api.http body="{{.Body}}" 时，path/query 绑定到请求其他字段，body 只绑定到 in.{{.BodyFieldGoName}}。
-	if err := s.binder.BindPathParams(ctx, &in); err != nil {
+	if err := runtime.BindPathParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := s.binder.BindQueryParams(ctx, &in); err != nil {
+	if err := runtime.BindQueryParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	if in.{{.BodyFieldGoName}} == nil {
 		in.{{.BodyFieldGoName}} = new({{.BodyFieldType}})
 	}
-	if err := s.binder.BindBody(ctx, in.{{.BodyFieldGoName}}); err != nil {
+	if err := runtime.BindBody(ctx, in.{{.BodyFieldGoName}}); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{end}}
@@ -147,6 +162,7 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	newCtx := runtime.BuildIncomingContext(ctx, {{.IsUpload}})
 
 	out, err := s.server.{{.Name}}(newCtx, &in)
+	runtime.WriteResponseHeaders(ctx, newCtx)
 	if err != nil {
 		return s.resp.Error(ctx, err)
 	}
@@ -154,25 +170,8 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 		return s.resp.Error(ctx, errors.New("service returned nil response without error"))
 	}
 
-	runtime.WriteResponseHeaders(ctx, newCtx)
-
 	{{if .IsAuthResponse}}
-	authCookie := new(http.Cookie)
-	authCookie.Name = "access_token"
-	authCookie.Value = out.AccessToken
-	authCookie.Path = "/"
-	authCookie.HttpOnly = true
-	authCookie.SameSite = http.SameSiteLaxMode
-	// 防止 int64/uint64 -> int 溢出：钳制到合理范围
-	expiresIn := int64(out.ExpiresIn)
-	if expiresIn < 0 {
-		expiresIn = 0
-	} else if expiresIn > 315360000 { // 10 年上限
-		expiresIn = 315360000
-	}
-	authCookie.MaxAge = int(expiresIn)
-	authCookie.Secure = runtime.IsProduction()
-	ctx.SetCookie(authCookie)
+	runtime.SetAuthCookie(ctx, out.AccessToken, int64(out.ExpiresIn))
 	{{end}}
 
 	{{if .IsFileDownload}}

@@ -127,7 +127,7 @@ func (v validatorStub) Validate(any) error { return v.err }
 
 func setRuntimeFlags(t *testing.T, isDev, detailed bool) {
 	t.Helper()
-	restore := echoruntime.SetEnvOverrides(isDev, detailed)
+	restore := echoruntime.SetEnvOverrides(isDev, false, detailed, false)
 	t.Cleanup(restore)
 }
 
@@ -208,7 +208,7 @@ func TestRuntime_ErrorDetailHiddenOutsideDevelopment(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("解析响应 JSON 失败: %v", err)
 	}
-	for _, key := range []string{"error_detail", "stack_trace", "path", "method"} {
+	for _, key := range []string{"error_detail", "error_verbose", "path", "method"} {
 		if _, ok := body[key]; ok {
 			t.Fatalf("非开发模式不应返回 %s，实际 body: %v", key, body)
 		}
@@ -236,8 +236,8 @@ func TestRuntime_ErrorDetailVisibleInDevelopment(t *testing.T) {
 	if detail, _ := body["error_detail"].(string); detail != "database unavailable" {
 		t.Fatalf("开发模式应返回 error_detail，实际: %v", body["error_detail"])
 	}
-	if stack, _ := body["stack_trace"].(string); stack == "" {
-		t.Fatalf("开发模式应返回 stack_trace，实际 body: %v", body)
+	if verbose, _ := body["error_verbose"].(string); verbose == "" {
+		t.Fatalf("开发模式应返回 error_verbose，实际 body: %v", body)
 	}
 	if path, _ := body["path"].(string); path != "/ping" {
 		t.Fatalf("开发模式应返回 path=/ping，实际: %v", body["path"])
