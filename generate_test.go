@@ -7,18 +7,15 @@ import (
 
 func TestGenerate_ResponseStyleWrapped(t *testing.T) {
 	generated := runGenerate(t, []string{"paths=source_relative", "response_style=wrapped"})
-	if !strings.Contains(generated, "SuccessResponse{") {
-		t.Fatalf("wrapped 风格应使用 SuccessResponse 结构体，实际输出:\n%s", generated)
-	}
-	if !strings.Contains(generated, "Data: data,") {
-		t.Fatalf("wrapped 风格应设置 Data 字段，实际输出:\n%s", generated)
+	if !strings.Contains(generated, "runtime.DefaultWrappedResp{}") {
+		t.Fatalf("wrapped 风格应使用 runtime.DefaultWrappedResp，实际输出:\n%s", generated)
 	}
 }
 
 func TestGenerate_ResponseStyleDirect(t *testing.T) {
 	generated := runGenerate(t, []string{"paths=source_relative", "response_style=direct"})
-	if !strings.Contains(generated, "return ctx.JSON(200, data)") {
-		t.Fatalf("direct 风格应直接返回 JSON，实际输出:\n%s", generated)
+	if !strings.Contains(generated, "runtime.DefaultDirectResp{}") {
+		t.Fatalf("direct 风格应使用 runtime.DefaultDirectResp，实际输出:\n%s", generated)
 	}
 	if strings.Contains(generated, `"data": data`) {
 		t.Fatalf("direct 风格不应生成包装 data 字段，实际输出:\n%s", generated)
@@ -37,7 +34,7 @@ func TestGenerate_NoProjectSpecificDependencyForUpload(t *testing.T) {
 
 func TestGenerate_RegisterAcceptsOptionalWrapper(t *testing.T) {
 	generated := runGenerate(t, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "wrappers ...UploadServiceResponseWrapper") {
+	if !strings.Contains(generated, "wrappers ...runtime.ResponseWrapper") {
 		t.Fatalf("Register 应支持可选响应包装器注入，实际输出:\n%s", generated)
 	}
 }
@@ -549,17 +546,17 @@ func TestGenerate_DefaultEmptyPathReportsError(t *testing.T) {
 
 func TestGenerate_AuthCookieSecureUsesIsProduction(t *testing.T) {
 	generated := runGenerateProto(t, testAuthCookieProto, []string{"paths=source_relative"})
-	// 验证生成代码中包含 IsProduction 包级别缓存变量定义
-	if !strings.Contains(generated, "IsProduction = func() bool") {
-		t.Fatalf("auth cookie 生成代码应包含 IsProduction 缓存变量定义，实际输出:\n%s", generated)
+	// 验证通过 runtime.IsProduction 判断 secure
+	if !strings.Contains(generated, "runtime.IsProduction()") {
+		t.Fatalf("auth cookie 生成代码应调用 runtime.IsProduction()，实际输出:\n%s", generated)
 	}
 	// 验证使用 http.Cookie 结构化设置（而非手工拼接字符串）
 	if !strings.Contains(generated, "http.Cookie") {
 		t.Fatalf("auth cookie 应使用 http.Cookie 结构化设置，实际输出:\n%s", generated)
 	}
-	// 验证 Secure 标志由缓存变量直接赋值
-	if !strings.Contains(generated, "authCookie.Secure = authServiceIsProduction") {
-		t.Fatalf("auth cookie Secure 应通过 IsProduction 缓存变量直接赋值，实际输出:\n%s", generated)
+	// 验证 Secure 标志由 runtime.IsProduction 直接赋值
+	if !strings.Contains(generated, "authCookie.Secure = runtime.IsProduction()") {
+		t.Fatalf("auth cookie Secure 应通过 runtime.IsProduction() 直接赋值，实际输出:\n%s", generated)
 	}
 	// 验证使用 ctx.SetCookie 而非手工拼 Set-Cookie 头
 	if !strings.Contains(generated, "ctx.SetCookie(authCookie)") {
@@ -595,39 +592,9 @@ func TestGenerate_NoNetHTTPImportWithoutAuthCookie(t *testing.T) {
 func TestGenerate_GRPCStatusMappingPresent(t *testing.T) {
 	code := runGenerateProto(t, testStableOutputProto, []string{"paths=source_relative"})
 
-	// 验证 gRPC status/codes import 存在
-	if !strings.Contains(code, `grpcCodes "google.golang.org/grpc/codes"`) {
-		t.Error("生成代码应包含 grpcCodes import")
-	}
-	if !strings.Contains(code, `grpcStatus "google.golang.org/grpc/status"`) {
-		t.Error("生成代码应包含 grpcStatus import")
-	}
-
-	// 验证映射函数存在
-	if !strings.Contains(code, "GRPCCodeToHTTPStatus") {
-		t.Error("生成代码应包含 GRPCCodeToHTTPStatus 映射函数")
-	}
-
-	// 验证 Error 方法中调用了 grpcStatus.FromError
-	if !strings.Contains(code, "grpcStatus.FromError(err)") {
-		t.Error("生成代码的默认 Error 方法应调用 grpcStatus.FromError")
-	}
-
-	// 验证关键映射条目
-	for _, keyword := range []string{
-		"grpcCodes.InvalidArgument",
-		"grpcCodes.Unauthenticated",
-		"grpcCodes.PermissionDenied",
-		"grpcCodes.NotFound",
-		"grpcCodes.AlreadyExists",
-		"grpcCodes.ResourceExhausted",
-		"grpcCodes.Unimplemented",
-		"grpcCodes.Unavailable",
-		"grpcCodes.DeadlineExceeded",
-	} {
-		if !strings.Contains(code, keyword) {
-			t.Errorf("生成代码应包含映射条目 %s", keyword)
-		}
+	// 映射逻辑已迁移到 runtime 包，生成代码应只依赖 runtime import
+	if !strings.Contains(code, `runtime "github.com/orzmoe/protoc-gen-go-echo/runtime"`) {
+		t.Error("生成代码应包含 runtime import")
 	}
 }
 
@@ -838,20 +805,14 @@ func TestGenerate_ValidatorGuardPresent(t *testing.T) {
 
 func TestGenerate_HopByHopHeaderFilterPresent(t *testing.T) {
 	generated := runGenerateProto(t, testStableOutputProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "SkipHeaders") {
-		t.Fatalf("生成代码应包含 SkipHeaders 过滤逻辑，实际输出:\n%s", generated)
-	}
-	// 验证包含关键的 hop-by-hop 头
-	for _, header := range []string{"Connection", "Transfer-Encoding", "Upgrade"} {
-		if !strings.Contains(generated, `"`+header+`"`) {
-			t.Errorf("SkipHeaders 应包含 %s", header)
-		}
+	if !strings.Contains(generated, "runtime.BuildIncomingContext") {
+		t.Fatalf("生成代码应调用 runtime.BuildIncomingContext 处理请求头，实际输出:\n%s", generated)
 	}
 }
 
 func TestGenerate_SetResponseHeaderHelperPresent(t *testing.T) {
 	generated := runGenerateProto(t, testStableOutputProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "func SetPingServiceResponseHeader(ctx context.Context, key, value string)") {
-		t.Fatalf("生成代码应包含导出的 SetXxxResponseHeader helper 函数，实际输出:\n%s", generated)
+	if !strings.Contains(generated, "runtime.SetResponseHeader") {
+		t.Fatalf("SetXxxResponseHeader helper 应委托 runtime.SetResponseHeader，实际输出:\n%s", generated)
 	}
 }

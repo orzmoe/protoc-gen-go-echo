@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"google.golang.org/genproto/googleapis/api/annotations"
 	"google.golang.org/protobuf/compiler/protogen"
@@ -31,34 +30,17 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	reservedAliases := []string{
 		"context",
 		"errors",
-		"fmt",
 		"http",
 		"mime",
-		"os",
-		"reflect",
-		"strings",
 		"echo",
 		"emptypb",
-		"grpcCodes",
-		"grpcStatus",
-		"metadata",
-		"time",
+		"runtime",
 	}
 	for _, svc := range file.Services {
 		name := svc.GoName
-		lowerName := strings.ToLower(name[:1]) + name[1:]
 		reservedAliases = append(reservedAliases,
-			name,                            // 服务结构体，如 AuthService
-			name+"HTTPServer",               // 接口
-			name+"PermissionChecker",        // 权限检查器接口
-			name+"ResponseWrapper",          // 响应包装器接口
-			name+"PermissionMeta",           // 权限元信息结构
-			lowerName+"RequestStateKey",     // 每请求状态 context key
-			lowerName+"RequestState",        // 每请求状态结构
-			lowerName+"ErrorResponse",       // 错误响应结构
-			lowerName+"ParamsErrorResponse", // 参数错误响应结构
-			lowerName+"ValidationErrorItem", // 校验错误项结构
-			lowerName+"SuccessResponse",     // 成功响应结构
+			name,              // 服务结构体，如 AuthService
+			name+"HTTPServer", // 接口
 		)
 	}
 	imports := newImportManager(
@@ -108,23 +90,17 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	g.P("import (")
 	g.P(`context "context"`)
 	g.P(`errors "errors"`)
-	g.P(`"fmt"`) // 用于错误堆栈格式化
 	if needsMime {
 		g.P(`"mime"`)
 	}
 	if needsNetHTTP {
 		g.P(`"net/http"`)
 	}
-	g.P(`"os"`)
-	g.P(`"reflect"`)
 	g.P("echo ", `"github.com/labstack/echo/v4"`)
 	if needsEmptyPb {
 		g.P(`"google.golang.org/protobuf/types/known/emptypb"`)
 	}
-	g.P(`grpcCodes "google.golang.org/grpc/codes"`)
-	g.P(`grpcStatus "google.golang.org/grpc/status"`)
-	g.P(`metadata "google.golang.org/grpc/metadata"`)
-	g.P(`"time"`)
+	g.P(`runtime "github.com/orzmoe/protoc-gen-go-echo/runtime"`)
 
 	for _, fileImport := range imports.Imports() {
 		g.P(fileImport.Alias, ` "`, fileImport.Path, `"`)

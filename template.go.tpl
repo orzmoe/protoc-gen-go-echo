@@ -5,31 +5,7 @@ type {{ $.InterfaceName }} interface {
 {{end}}
 }
 
-type {{$.Name}}PermissionChecker interface {
-	CheckPermission(ctx echo.Context, code string) error
-	CheckAllPermissions(ctx echo.Context, codes []string) error
-	CheckAnyPermission(ctx echo.Context, codes []string) error
-	CheckAuth(ctx echo.Context) error
-}
-
-type {{$.Name}}ResponseWrapper interface {
-	ParamsError(ctx echo.Context, err error) error
-	Success(ctx echo.Context, data any) error
-	Error(ctx echo.Context, err error) error
-}
-
-type {{$.Name}}PermissionMeta struct {
-	Method      string
-	Path        string
-	Handler     string
-	Permission  string
-	IsPublic    bool
-	IsAuthOnly  bool
-	Summary     string
-	Description string
-}
-
-func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, perm {{$.Name}}PermissionChecker, wrappers ...{{$.Name}}ResponseWrapper) {
+func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, perm runtime.PermissionChecker, wrappers ...runtime.ResponseWrapper) {
 	if e == nil {
 		panic("Register{{$.InterfaceName}}: echo.Group must not be nil")
 	}
@@ -39,7 +15,11 @@ func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, per
 	if perm == nil {
 		panic("Register{{$.InterfaceName}}: permission checker must not be nil")
 	}
-	resp := {{$.Name}}ResponseWrapper(default{{$.Name}}Resp{})
+	{{if $.UseWrappedResponse}}
+	resp := runtime.ResponseWrapper(runtime.DefaultWrappedResp{})
+	{{else}}
+	resp := runtime.ResponseWrapper(runtime.DefaultDirectResp{})
+	{{end}}
 	if len(wrappers) > 0 && wrappers[0] != nil {
 		resp = wrappers[0]
 	}
@@ -54,8 +34,8 @@ func Register{{ $.InterfaceName }}(e *echo.Group, srv {{ $.InterfaceName }}, per
 	s.RegisterService()
 }
 
-func Get{{$.Name}}PermissionMetas() []{{$.Name}}PermissionMeta {
-	return []{{$.Name}}PermissionMeta{
+func Get{{$.Name}}PermissionMetas() []runtime.PermissionMeta {
+	return []runtime.PermissionMeta{
 {{range .Methods}}
 		{
 			Method:      {{printf "%q" .Method}},
@@ -71,354 +51,23 @@ func Get{{$.Name}}PermissionMetas() []{{$.Name}}PermissionMeta {
 	}
 }
 
-type {{$.Name}} struct {
-	server {{ $.InterfaceName }}
-	router *echo.Group
-	perm   {{$.Name}}PermissionChecker
-	resp   {{$.Name}}ResponseWrapper
-	binder *echo.DefaultBinder
-}
-
-type default{{$.Name}}Resp struct{}
-
-// ── 响应结构体（替代 map[string]any 以减少分配和 JSON 编码开销） ──
-
-// {{$.LowerName}}ErrorResponse 错误响应的固定结构。
-type {{$.LowerName}}ErrorResponse struct {
-	Code        int    `json:"code"`
-	Msg         string `json:"msg"`
-	Timestamp   int64  `json:"timestamp"`
-	TraceID     string `json:"trace_id,omitempty"`
-	RequestID   string `json:"request_id,omitempty"`
-	ErrorDetail string `json:"error_detail,omitempty"`
-	StackTrace  string `json:"stack_trace,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Method      string `json:"method,omitempty"`
-}
-
-// {{$.LowerName}}ParamsErrorResponse 参数错误响应的固定结构。
-type {{$.LowerName}}ParamsErrorResponse struct {
-	Code             int                                  `json:"code"`
-	Msg              string                               `json:"msg"`
-	Timestamp        int64                                `json:"timestamp"`
-	TraceID          string                               `json:"trace_id,omitempty"`
-	RequestID        string                               `json:"request_id,omitempty"`
-	ErrorDetail      string                               `json:"error_detail,omitempty"`
-	ValidationErrors []{{$.LowerName}}ValidationErrorItem `json:"validation_errors,omitempty"`
-	Path             string                               `json:"path,omitempty"`
-	Method           string                               `json:"method,omitempty"`
-}
-
-// {{$.LowerName}}ValidationErrorItem 单个字段校验错误。
-type {{$.LowerName}}ValidationErrorItem struct {
-	Field string `json:"field"`
-	Tag   string `json:"tag"`
-	Param string `json:"param"`
-}
-
-// {{$.LowerName}}SuccessResponse wrapped 模式的成功响应结构。
-type {{$.LowerName}}SuccessResponse struct {
-	Code      int    `json:"code"`
-	Msg       string `json:"msg"`
-	Data      any    `json:"data"`
-	Timestamp int64  `json:"timestamp,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-}
-
-// ── 每请求状态（合并 response header + upload echo.Context，减少 context.WithValue 调用） ──
-
-// {{$.LowerName}}RequestState 聚合每个请求的上下文状态。
-// responseHeaders 在 handler 中预创建，业务层通过 Set{{$.Name}}ResponseHeader 写入。
-type {{$.LowerName}}RequestState struct {
-	responseHeaders map[string][]string
-	echoCtx         echo.Context // 仅 upload 场景赋值
-}
-
-type {{$.LowerName}}RequestStateKey struct{}
-
-// ── 错误响应 ──
-
-func (resp default{{$.Name}}Resp) Error(ctx echo.Context, err error) error {
-	code := 500
-	status := 500
-	msg := "Internal Server Error"
-
-	if err == nil {
-		msg = "Unknown error, err is nil"
-		return resp.buildErrorResponse(ctx, status, code, msg, err)
-	}
-
-	type iCode interface {
-		HTTPCode() int
-		Message() string
-		Code() int
-	}
-
-	var c iCode
-	if errors.As(err, &c) {
-		status = c.HTTPCode()
-		code = c.Code()
-		msg = c.Message()
-		return resp.buildErrorResponse(ctx, status, code, msg, err)
-	}
-
-	if st, ok := grpcStatus.FromError(err); ok && st.Code() != grpcCodes.OK {
-		status = {{$.LowerName}}GRPCCodeToHTTPStatus(st.Code())
-		code = status
-		msg = st.Message()
-		return resp.buildErrorResponse(ctx, status, code, msg, err)
-	}
-
-	return resp.buildErrorResponse(ctx, status, code, msg, err)
-}
-
-func (resp default{{$.Name}}Resp) buildErrorResponse(ctx echo.Context, status, code int, msg string, err error) error {
-	if err != nil {
-		ctx.Set("_error", err)
-	}
-
-	r := {{$.LowerName}}ErrorResponse{
-		Code:      code,
-		Msg:       msg,
-		Timestamp: time.Now().Unix(),
-		TraceID:   get{{$.Name}}TraceID(ctx),
-		RequestID: get{{$.Name}}RequestID(ctx),
-	}
-
-	if is{{$.Name}}Development() {
-		if err != nil {
-			r.ErrorDetail = err.Error()
-			r.StackTrace = fmt.Sprintf("%+v", err)
-		}
-		r.Path = ctx.Request().URL.Path
-		r.Method = ctx.Request().Method
-	}
-
-	return ctx.JSON(status, &r)
-}
-
-// {{$.LowerName}}IsDev 在进程启动时缓存环境判断结果，避免每次请求都调用 os.Getenv。
-var {{$.LowerName}}IsDev = func() bool {
-	env := os.Getenv("ENV")
-	if env == "" {
-		env = os.Getenv("ENVIRONMENT")
-	}
-	return env == "development" || env == "dev" || env == "local"
-}()
-
-func is{{$.Name}}Development() bool {
-	return {{$.LowerName}}IsDev
-}
-
-func (resp default{{$.Name}}Resp) ParamsError(ctx echo.Context, err error) error {
-	r := {{$.LowerName}}ParamsErrorResponse{
-		Code:      400,
-		Msg:       "参数错误",
-		Timestamp: time.Now().Unix(),
-		TraceID:   get{{$.Name}}TraceID(ctx),
-		RequestID: get{{$.Name}}RequestID(ctx),
-	}
-
-	if is{{$.Name}}Development() || is{{$.Name}}DetailedValidation() {
-		if err != nil {
-			r.ErrorDetail = err.Error()
-			r.ValidationErrors = parse{{$.Name}}ValidationErrors(err)
-		}
-	}
-	if is{{$.Name}}Development() {
-		r.Path = ctx.Request().URL.Path
-		r.Method = ctx.Request().Method
-	}
-
-	return ctx.JSON(400, &r)
-}
-
-// {{$.LowerName}}IsDetailedValidation 在进程启动时缓存，避免每次请求都调用 os.Getenv。
-var {{$.LowerName}}IsDetailedValidation = os.Getenv("DETAILED_VALIDATION") == "true"
-
-func is{{$.Name}}DetailedValidation() bool {
-	return {{$.LowerName}}IsDetailedValidation
-}
-
-func parse{{$.Name}}ValidationErrors(err error) []{{$.LowerName}}ValidationErrorItem {
-	if err == nil {
-		return nil
-	}
-
-	var validationErrors []{{$.LowerName}}ValidationErrorItem
-
-	type fieldError interface {
-		Field() string
-		Tag() string
-		Param() string
-	}
-
-	// 提取单个字段错误信息的 helper
-	appendFieldError := func(fe fieldError) {
-		validationErrors = append(validationErrors, {{$.LowerName}}ValidationErrorItem{
-			Field: fe.Field(),
-			Tag:   fe.Tag(),
-			Param: fe.Param(),
-		})
-	}
-
-	// 路径 1: Unwrap() []error（Go 1.20+ 多错误展开）
-	if feSlice, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, e := range feSlice.Unwrap() {
-			if fe, ok := e.(fieldError); ok {
-				appendFieldError(fe)
-			}
-		}
-	}
-
-	// 路径 2: error 底层类型是 slice/array，且元素实现 fieldError
-	// 典型案例：go-playground/validator/v10.ValidationErrors 底层为 []FieldError，
-	// 每个元素同时实现 error 和 fieldError，但整个切片不一定实现 Unwrap() []error。
-	if len(validationErrors) == 0 {
-		rv := reflect.ValueOf(err)
-		// 如果 err 是接口/指针，先取底层值
-		for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
-			rv = rv.Elem()
-		}
-		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-			for i := range rv.Len() {
-				elem := rv.Index(i).Interface()
-				if fe, ok := elem.(fieldError); ok {
-					appendFieldError(fe)
-				}
-			}
-		}
-	}
-
-	// 路径 3: 错误本身就是 fieldError（单字段校验失败的兜底）
-	if len(validationErrors) == 0 {
-		var fe fieldError
-		if errors.As(err, &fe) {
-			appendFieldError(fe)
-		}
-	}
-
-	return validationErrors
-}
-
-func (resp default{{$.Name}}Resp) Success(ctx echo.Context, data any) error {
-	{{if $.UseWrappedResponse}}
-	r := {{$.LowerName}}SuccessResponse{
-		Code: 200,
-		Msg:  "成功",
-		Data: data,
-	}
-
-	if is{{$.Name}}Development() && is{{$.Name}}VerboseSuccess() {
-		r.Timestamp = time.Now().Unix()
-		r.RequestID = get{{$.Name}}RequestID(ctx)
-	}
-
-	return ctx.JSON(200, &r)
-	{{else}}
-	return ctx.JSON(200, data)
-	{{end}}
-}
-
-// {{$.LowerName}}IsVerboseSuccess 在进程启动时缓存，避免每次请求都调用 os.Getenv。
-var {{$.LowerName}}IsVerboseSuccess = os.Getenv("VERBOSE_SUCCESS") == "true"
-
-func is{{$.Name}}VerboseSuccess() bool {
-	return {{$.LowerName}}IsVerboseSuccess
-}
-
-// {{$.LowerName}}IsProduction 在进程启动时缓存生产环境判断，用于 Secure cookie 等场景。
-var {{$.LowerName}}IsProduction = func() bool {
-	env := os.Getenv("ENV")
-	if env == "" {
-		env = os.Getenv("ENVIRONMENT")
-	}
-	return env == "production" || env == "prod"
-}()
-
-func get{{$.Name}}TraceID(ctx echo.Context) string {
-	if traceID := ctx.Request().Header.Get("X-Trace-ID"); traceID != "" {
-		return traceID
-	}
-	if traceID := ctx.Get("trace_id"); traceID != nil {
-		if id, ok := traceID.(string); ok {
-			return id
-		}
-	}
-	return ""
-}
-
-func get{{$.Name}}RequestID(ctx echo.Context) string {
-	requestID := ctx.Response().Header().Get(echo.HeaderXRequestID)
-	if requestID == "" {
-		requestID = ctx.Request().Header.Get("X-Request-ID")
-	}
-	return requestID
-}
-
-// {{$.LowerName}}GRPCCodeToHTTPStatus 将 gRPC 状态码映射为 HTTP 状态码。
-func {{$.LowerName}}GRPCCodeToHTTPStatus(c grpcCodes.Code) int {
-	switch c {
-	case grpcCodes.OK:
-		return 200
-	case grpcCodes.InvalidArgument, grpcCodes.FailedPrecondition:
-		return 400
-	case grpcCodes.Unauthenticated:
-		return 401
-	case grpcCodes.PermissionDenied:
-		return 403
-	case grpcCodes.NotFound:
-		return 404
-	case grpcCodes.AlreadyExists, grpcCodes.Aborted:
-		return 409
-	case grpcCodes.OutOfRange:
-		return 400
-	case grpcCodes.ResourceExhausted:
-		return 429
-	case grpcCodes.Canceled:
-		return 499
-	case grpcCodes.Unimplemented:
-		return 501
-	case grpcCodes.Unavailable:
-		return 503
-	case grpcCodes.DeadlineExceeded:
-		return 504
-	case grpcCodes.DataLoss, grpcCodes.Internal:
-		return 500
-	default:
-		return 500
-	}
+// Set{{$.Name}}ResponseHeader 在业务层设置将要写回 HTTP 响应的 header。
+// 注意：此函数不是并发安全的，不应在多个 goroutine 中同时调用。
+func Set{{$.Name}}ResponseHeader(ctx context.Context, key, value string) {
+	runtime.SetResponseHeader(ctx, key, value)
 }
 
 // Get{{$.Name}}EchoContext 从 context 中获取 echo.Context（仅 upload 场景会注入值）。
 func Get{{$.Name}}EchoContext(ctx context.Context) (echo.Context, bool) {
-	if state, ok := ctx.Value({{$.LowerName}}RequestStateKey{}).(*{{$.LowerName}}RequestState); ok && state.echoCtx != nil {
-		return state.echoCtx, true
-	}
-	return nil, false
+	return runtime.GetEchoContext(ctx)
 }
 
-// {{$.LowerName}}SkipHeaders 定义不应透传到 gRPC metadata 的 HTTP 头。
-// 包含 hop-by-hop 头和敏感头，避免语义污染和信息泄露。
-var {{$.LowerName}}SkipHeaders = map[string]struct{}{
-	"Connection":          {},
-	"Keep-Alive":          {},
-	"Proxy-Authenticate":  {},
-	"Proxy-Authorization": {},
-	"Te":                  {},
-	"Trailer":             {},
-	"Transfer-Encoding":   {},
-	"Upgrade":             {},
-	"Host":                {},
-	"Content-Length":      {},
-}
-
-// Set{{$.Name}}ResponseHeader 在业务层设置将要写回 HTTP 响应的 header。
-// 注意：此函数不是并发安全的，不应在多个 goroutine 中同时调用。
-func Set{{$.Name}}ResponseHeader(ctx context.Context, key, value string) {
-	if state, ok := ctx.Value({{$.LowerName}}RequestStateKey{}).(*{{$.LowerName}}RequestState); ok {
-		state.responseHeaders[key] = append(state.responseHeaders[key], value)
-	}
+type {{$.Name}} struct {
+	server {{ $.InterfaceName }}
+	router *echo.Group
+	perm   runtime.PermissionChecker
+	resp   runtime.ResponseWrapper
+	binder *echo.DefaultBinder
 }
 
 {{range .Methods}}
@@ -495,41 +144,7 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	}
 	{{end}}
 
-	req := ctx.Request()
-	hdr := req.Header
-	md := make(metadata.MD, len(hdr)+2)
-	var hasXRealIP, hasUserAgent bool
-	for k, v := range hdr {
-		if _, skip := {{$.LowerName}}SkipHeaders[k]; skip {
-			continue
-		}
-		switch k {
-		case "X-Real-Ip":
-			hasXRealIP = true
-		case "User-Agent":
-			hasUserAgent = true
-		}
-		md.Set(k, v...)
-	}
-	if !hasXRealIP {
-		if clientIP := ctx.RealIP(); clientIP != "" {
-			md.Set("x-real-ip", clientIP)
-		}
-	}
-	if !hasUserAgent {
-		if ua := req.UserAgent(); ua != "" {
-			md.Set("user-agent", ua)
-		}
-	}
-
-	state := &{{$.LowerName}}RequestState{
-		responseHeaders: make(map[string][]string),
-	}
-	{{if .IsUpload}}
-	state.echoCtx = ctx
-	{{end}}
-	newCtx := context.WithValue(req.Context(), {{$.LowerName}}RequestStateKey{}, state)
-	newCtx = metadata.NewIncomingContext(newCtx, md)
+	newCtx := runtime.BuildIncomingContext(ctx, {{.IsUpload}})
 
 	out, err := s.server.{{.Name}}(newCtx, &in)
 	if err != nil {
@@ -539,13 +154,7 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 		return s.resp.Error(ctx, errors.New("service returned nil response without error"))
 	}
 
-	if len(state.responseHeaders) > 0 {
-		for key, values := range state.responseHeaders {
-			for _, value := range values {
-				ctx.Response().Header().Add(key, value)
-			}
-		}
-	}
+	runtime.WriteResponseHeaders(ctx, newCtx)
 
 	{{if .IsAuthResponse}}
 	authCookie := new(http.Cookie)
@@ -562,7 +171,7 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 		expiresIn = 315360000
 	}
 	authCookie.MaxAge = int(expiresIn)
-	authCookie.Secure = {{$.LowerName}}IsProduction
+	authCookie.Secure = runtime.IsProduction()
 	ctx.SetCookie(authCookie)
 	{{end}}
 

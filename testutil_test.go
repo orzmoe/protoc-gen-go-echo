@@ -212,7 +212,11 @@ func compileGeneratedPackages(t *testing.T, cases ...compileCase) {
 		}
 	}
 
-	goMod := "module example.com/compile\n\ngo 1.26.1\n"
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("获取仓库根目录失败: %v", err)
+	}
+	goMod := fmt.Sprintf("module example.com/compile\n\ngo 1.26.1\n\nreplace github.com/orzmoe/protoc-gen-go-echo => %s\n", repoRoot)
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o600); err != nil {
 		t.Fatalf("写入 go.mod 失败: %v", err)
 	}

@@ -11,7 +11,7 @@ const runtimeTestProto = `syntax = "proto3";
 
 package test.runtime.v1;
 
-option go_package = "example.com/runtime;runtime";
+option go_package = "example.com/runtime/runtimetest;runtimetest";
 
 import "google/api/annotations.proto";
 import "google/protobuf/descriptor.proto";
@@ -65,7 +65,7 @@ service RuntimeService {
 }
 `
 
-const runtimeTestFile = `package runtime
+const runtimeTestFile = `package runtimetest
 
 import (
 	"context"
@@ -77,6 +77,7 @@ import (
 	"strings"
 	"testing"
 
+	echoruntime "github.com/orzmoe/protoc-gen-go-echo/runtime"
 	"github.com/labstack/echo/v4"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -126,14 +127,8 @@ func (v validatorStub) Validate(any) error { return v.err }
 
 func setRuntimeFlags(t *testing.T, isDev, detailed bool) {
 	t.Helper()
-	oldDev := runtimeServiceIsDev
-	oldDetailed := runtimeServiceIsDetailedValidation
-	runtimeServiceIsDev = isDev
-	runtimeServiceIsDetailedValidation = detailed
-	t.Cleanup(func() {
-		runtimeServiceIsDev = oldDev
-		runtimeServiceIsDetailedValidation = oldDetailed
-	})
+	restore := echoruntime.SetEnvOverrides(isDev, detailed)
+	t.Cleanup(restore)
 }
 
 func setupEcho(srv RuntimeServiceHTTPServer) *echo.Echo {
@@ -540,7 +535,7 @@ func TestRuntime_ParseValidationErrors_MultiFieldSlice(t *testing.T) {
 		{field: "Email", tag: "email", param: ""},
 		{field: "Age", tag: "gte", param: "18"},
 	}
-	result := parseRuntimeServiceValidationErrors(verr)
+	result := echoruntime.ParseValidationErrors(verr)
 	if len(result) != 3 {
 		t.Fatalf("应提取 3 个字段错误，实际: %d, result: %v", len(result), result)
 	}
@@ -558,7 +553,7 @@ func TestRuntime_ParseValidationErrors_MultiFieldSlice(t *testing.T) {
 func TestRuntime_ParseValidationErrors_SingleFieldError(t *testing.T) {
 	// 单个 fieldError（非 slice），应走 errors.As 兜底
 	verr := mockFieldError{field: "Token", tag: "required", param: ""}
-	result := parseRuntimeServiceValidationErrors(verr)
+	result := echoruntime.ParseValidationErrors(verr)
 	if len(result) != 1 {
 		t.Fatalf("应提取 1 个字段错误，实际: %d, result: %v", len(result), result)
 	}
@@ -575,7 +570,7 @@ func TestRuntime_ParseValidationErrors_UnwrapMultipleErrors(t *testing.T) {
 			mockFieldError{field: "B", tag: "max", param: "100"},
 		},
 	}
-	result := parseRuntimeServiceValidationErrors(verr)
+	result := echoruntime.ParseValidationErrors(verr)
 	if len(result) != 2 {
 		t.Fatalf("应提取 2 个字段错误，实际: %d, result: %v", len(result), result)
 	}
@@ -586,7 +581,7 @@ func TestRuntime_ParseValidationErrors_UnwrapMultipleErrors(t *testing.T) {
 
 func TestRuntime_ParseValidationErrors_NilError(t *testing.T) {
 	// nil error 不应 panic
-	result := parseRuntimeServiceValidationErrors(nil)
+	result := echoruntime.ParseValidationErrors(nil)
 	if len(result) != 0 {
 		t.Fatalf("nil error 应返回空切片，实际: %v", result)
 	}
@@ -595,7 +590,7 @@ func TestRuntime_ParseValidationErrors_NilError(t *testing.T) {
 func TestRuntime_ParseValidationErrors_PlainError(t *testing.T) {
 	// 普通 error（不实现 fieldError），应返回空切片
 	verr := errors.New("some random error")
-	result := parseRuntimeServiceValidationErrors(verr)
+	result := echoruntime.ParseValidationErrors(verr)
 	if len(result) != 0 {
 		t.Fatalf("普通 error 应返回空切片，实际: %v", result)
 	}
@@ -608,7 +603,7 @@ func TestGenerate_RuntimeBehavior(t *testing.T) {
 	writeGoogleAPIProtos(t, tmpDir)
 
 	// 写入 proto
-	caseDir := filepath.Join(tmpDir, "runtime")
+	caseDir := filepath.Join(tmpDir, "runtimetest")
 	if err := os.MkdirAll(caseDir, 0o755); err != nil {
 		t.Fatalf("创建运行时测试目录失败: %v", err)
 	}
@@ -624,7 +619,7 @@ func TestGenerate_RuntimeBehavior(t *testing.T) {
 		"--go_out=paths=source_relative:" + tmpDir,
 		"--go-echo_out=paths=source_relative:" + tmpDir,
 		"--proto_path=" + tmpDir,
-		"runtime/test.proto",
+		"runtimetest/test.proto",
 	}
 	protocCmd := exec.Command("protoc", protocArgs...)
 	protocCmd.Dir = tmpDir
@@ -639,7 +634,11 @@ func TestGenerate_RuntimeBehavior(t *testing.T) {
 	}
 
 	// 初始化 go module
-	goMod := "module example.com/runtime\n\ngo 1.26.1\n"
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("获取仓库根目录失败: %v", err)
+	}
+	goMod := "module example.com/runtime\n\ngo 1.26.1\n\nreplace github.com/orzmoe/protoc-gen-go-echo => " + repoRoot + "\n"
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(goMod), 0o600); err != nil {
 		t.Fatalf("写入 go.mod 失败: %v", err)
 	}
@@ -651,7 +650,7 @@ func TestGenerate_RuntimeBehavior(t *testing.T) {
 	}
 
 	// 运行生成代码的测试
-	testCmd := exec.Command("go", "test", "-race", "-count=1", "-v", "./runtime/...")
+	testCmd := exec.Command("go", "test", "-race", "-count=1", "-v", "./runtimetest/...")
 	testCmd.Dir = tmpDir
 	output, err := testCmd.CombinedOutput()
 	if err != nil {
