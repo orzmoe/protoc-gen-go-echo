@@ -21,8 +21,8 @@ func buildTestProtogenMessage(t *testing.T, messageName string, fields []testMes
 	msgFields := make([]*descriptorpb.FieldDescriptorProto, 0, len(fields))
 	for i, field := range fields {
 		msgFields = append(msgFields, &descriptorpb.FieldDescriptorProto{
-			Name:   proto.String(field.name),
-			Number: proto.Int32(int32(i + 1)),
+			Name:   new(field.name),
+			Number: new(int32(i + 1)),
 			Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 			Type:   field.fieldType.Enum(),
 		})
@@ -34,14 +34,14 @@ func buildTestProtogenMessage(t *testing.T, messageName string, fields []testMes
 		ProtoFile: []*descriptorpb.FileDescriptorProto{
 			{
 				Name:    proto.String(fileName),
-				Package: proto.String("test.v1"),
-				Syntax:  proto.String("proto3"),
+				Package: new("test.v1"),
+				Syntax:  new("proto3"),
 				Options: &descriptorpb.FileOptions{
-					GoPackage: proto.String("example.com/test/v1;testv1"),
+					GoPackage: new("example.com/test/v1;testv1"),
 				},
 				MessageType: []*descriptorpb.DescriptorProto{
 					{
-						Name:  proto.String(messageName),
+						Name:  new(messageName),
 						Field: msgFields,
 					},
 				},

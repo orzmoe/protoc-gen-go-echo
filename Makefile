@@ -18,6 +18,7 @@ vet:
 	go vet ./...
 
 lint: vet
+	go fix -diff ./... # 有可套用的现代化改写时失败；用 go fix ./... 应用
 	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint 未安装，跳过（go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest）"; exit 0; }; \
 	golangci-lint run ./...
 

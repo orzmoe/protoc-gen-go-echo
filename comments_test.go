@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -175,9 +176,7 @@ func TestUnit_registerGoPackageName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			packageNames := make(map[protogen.GoImportPath]protogen.GoPackageName)
-			for path, name := range tc.seedMapping {
-				packageNames[path] = name
-			}
+			maps.Copy(packageNames, tc.seedMapping)
 
 			registerGoPackageName(packageNames, tc.file)
 			assertPackageNameRegistered(t, packageNames, tc.checkPath, tc.wantName, tc.wantExists)

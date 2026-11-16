@@ -63,7 +63,7 @@ func BuildIncomingContext(ctx *echo.Context, isUpload bool) context.Context {
 	dynamicSkip := make(map[string]struct{})
 	if connValues := hdr.Values("Connection"); len(connValues) > 0 {
 		for _, connValue := range connValues {
-			for _, token := range strings.Split(connValue, ",") {
+			for token := range strings.SplitSeq(connValue, ",") {
 				token = strings.TrimSpace(token)
 				if token == "" {
 					continue
