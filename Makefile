@@ -18,7 +18,8 @@ vet:
 	go vet ./...
 
 lint: vet
-	@command -v golangci-lint >/dev/null 2>&1 && golangci-lint run ./... || echo "golangci-lint 未安装，跳过（go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest）"
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint 未安装，跳过（go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest）"; exit 0; }; \
+	golangci-lint run ./...
 
 clean:
 	rm -f $(BINARY)

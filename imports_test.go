@@ -1,8 +1,9 @@
 package main
 
 import (
-	"google.golang.org/protobuf/compiler/protogen"
 	"testing"
+
+	"google.golang.org/protobuf/compiler/protogen"
 )
 
 func TestUnit_sanitizeImportAlias(t *testing.T) {

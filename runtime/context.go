@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	echo "github.com/labstack/echo/v4"
+	echo "github.com/labstack/echo/v5"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -14,7 +14,7 @@ import (
 type requestState struct {
 	mu              sync.Mutex
 	responseHeaders map[string][]string
-	echoCtx         echo.Context // 仅 upload 场景赋值
+	echoCtx         *echo.Context // 仅 upload 场景赋值
 }
 
 // requestStateKey 是 requestState 在 context.Context 中的 key 类型。
@@ -41,7 +41,7 @@ var skipHeaders = map[string]struct{}{
 //
 // isUpload 为 true 时，会将 echo.Context 存入请求状态，
 // 业务层可通过 [GetEchoContext] 获取。
-func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
+func BuildIncomingContext(ctx *echo.Context, isUpload bool) context.Context {
 	// 防重入：如果 context 中已有 state，复用而非覆盖
 	reqCtx := ctx.Request().Context()
 	if existing, ok := reqCtx.Value(requestStateKey{}).(*requestState); ok {
@@ -80,8 +80,7 @@ func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
 		if _, skip := dynamicSkip[canonicalKey]; skip {
 			continue
 		}
-		switch canonicalKey {
-		case "User-Agent":
+		if canonicalKey == "User-Agent" {
 			hasUserAgent = true
 		}
 		md.Set(k, v...)
@@ -115,7 +114,7 @@ func BuildIncomingContext(ctx echo.Context, isUpload bool) context.Context {
 
 // WriteResponseHeaders 将请求状态中累积的响应 header 写回 HTTP 响应。
 // reqCtx 应为 [BuildIncomingContext] 返回的 context。
-func WriteResponseHeaders(echoCtx echo.Context, reqCtx context.Context) {
+func WriteResponseHeaders(echoCtx *echo.Context, reqCtx context.Context) {
 	state, ok := reqCtx.Value(requestStateKey{}).(*requestState)
 	if !ok {
 		return
@@ -152,7 +151,7 @@ func SetResponseHeader(ctx context.Context, key, value string) {
 
 // GetEchoContext 从 context 中获取 echo.Context。
 // 仅在 upload 场景下（[BuildIncomingContext] 的 isUpload 为 true 时）会返回有效值。
-func GetEchoContext(ctx context.Context) (echo.Context, bool) {
+func GetEchoContext(ctx context.Context) (*echo.Context, bool) {
 	if state, ok := ctx.Value(requestStateKey{}).(*requestState); ok {
 		state.mu.Lock()
 		echoCtx := state.echoCtx

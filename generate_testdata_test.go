@@ -388,36 +388,6 @@ service RedirectService {
 }
 `
 
-const testResponseModeNormalProto = `syntax = "proto3";
-
-package test.v1;
-
-option go_package = "example.com/test/v1;testv1";
-
-import "google/protobuf/descriptor.proto";
-
-extend google.protobuf.MethodOptions {
-	int32 response_mode = 50008;
-}
-
-message DownloadLikeRequest {
-	string id = 1;
-}
-
-message DownloadLikeReply {
-	bytes content = 1;
-	string filename = 2;
-	string content_type = 3;
-}
-
-service DownloadLikeService {
-	// @summary 普通响应模式
-	rpc GetItem(DownloadLikeRequest) returns (DownloadLikeReply) {
-		option (response_mode) = 1;
-	}
-}
-`
-
 const testResponseModeFileDownloadInvalidProto = `syntax = "proto3";
 
 package test.v1;
@@ -639,48 +609,5 @@ service MixedService {
 	rpc GetItems(Req) returns (Reply) {
 		option (test.options.any_permission) = "perm.x, , perm.y";
 	}
-}
-`
-
-// ── 编译验证 ──────────────────────────────────────────────
-
-const compileMainProto = `syntax = "proto3";
-
-package test.compile.v1;
-
-option go_package = "example.com/compile;compilev1";
-
-import "google/api/annotations.proto";
-
-import "google/protobuf/empty.proto";
-import "deps/common/common.proto";
-
-message CreateRequest {
-	string id = 1;
-	string keyword = 2;
-}
-
-service CompileService {
-	// @summary 编译验证
-	rpc Create(deps.common.ExternalRequest) returns (google.protobuf.Empty) {
-		option (google.api.http) = {
-			post: "/v1/items/{id}"
-			body: "*"
-			additional_bindings {
-				get: "/v1/items/{id=*}"
-			}
-		};
-	}
-}
-`
-
-const compileExternalProto = `syntax = "proto3";
-
-package deps.common;
-
-option go_package = "example.com/compile/deps/common;commonpb";
-
-message ExternalRequest {
-	string value = 1;
 }
 `

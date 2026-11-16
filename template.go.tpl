@@ -86,7 +86,7 @@ type {{$.Name}} struct {
 }
 
 {{range .Methods}}
-func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
+func (s *{{$.Name}}) {{ .HandlerName }}(ctx *echo.Context) error {
 	{{if not .IsPublic}}
 	{{if .IsAuthOnly}}
 	if err := s.perm.CheckAuth(ctx); err != nil {
@@ -122,32 +122,32 @@ func (s *{{$.Name}}) {{ .HandlerName }}(ctx echo.Context) error {
 	}
 	{{else if .UsesPathQueryBinding}}
 	// google.api.http 未指定 body 时，只绑定 path/query，不读取请求体。
-	if err := runtime.BindPathParams(ctx, &in); err != nil {
+	if err := echo.BindPathValues(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := runtime.BindQueryParams(ctx, &in); err != nil {
+	if err := echo.BindQueryParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{else if .UsesPathBodyBinding}}
 	// google.api.http body="*" 时，除路径参数外，其余字段来自请求体。
-	if err := runtime.BindPathParams(ctx, &in); err != nil {
+	if err := echo.BindPathValues(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := runtime.BindBody(ctx, &in); err != nil {
+	if err := echo.BindBody(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{else if .UsesPathQueryBodyFieldBinding}}
 	// google.api.http body="{{.Body}}" 时，path/query 绑定到请求其他字段，body 只绑定到 in.{{.BodyFieldGoName}}。
-	if err := runtime.BindPathParams(ctx, &in); err != nil {
+	if err := echo.BindPathValues(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
-	if err := runtime.BindQueryParams(ctx, &in); err != nil {
+	if err := echo.BindQueryParams(ctx, &in); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	if in.{{.BodyFieldGoName}} == nil {
 		in.{{.BodyFieldGoName}} = new({{.BodyFieldType}})
 	}
-	if err := runtime.BindBody(ctx, in.{{.BodyFieldGoName}}); err != nil {
+	if err := echo.BindBody(ctx, in.{{.BodyFieldGoName}}); err != nil {
 		return s.resp.ParamsError(ctx, err)
 	}
 	{{end}}

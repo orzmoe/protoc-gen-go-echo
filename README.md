@@ -7,6 +7,8 @@
 - 权限检查器接口与权限元信息
 - 统一响应封装（可选覆盖）
 
+生成代码面向 **Echo v5**（`github.com/labstack/echo/v5`），handler 签名为 `func(*echo.Context) error`；共享基础设施位于 `github.com/orzmoe/protoc-gen-go-echo/runtime`。
+
 ## 安装
 
 ```bash
@@ -52,21 +54,21 @@ protoc \
 生成的注册函数签名：
 
 ```go
-func RegisterXxxHTTPServer(e *echo.Group, srv XxxHTTPServer, perm XxxPermissionChecker, wrappers ...XxxResponseWrapper)
+func RegisterXxxHTTPServer(e *echo.Group, srv XxxHTTPServer, perm runtime.PermissionChecker, wrappers ...runtime.ResponseWrapper)
 ```
 
 - 不传 `wrappers`：使用内置默认响应实现。
-- 传入一个 `XxxResponseWrapper`：覆盖默认成功/错误/参数错误响应逻辑。
+- 传入一个 `runtime.ResponseWrapper`：覆盖默认成功/错误/参数错误响应逻辑。
 
 ### 2) Upload 场景 Echo Context 注入
 
-upload 方法会把 `echo.Context` 写入 `context.Context`，并生成读取函数：
+upload 方法会把 `*echo.Context` 写入 `context.Context`，业务层通过 runtime 读取：
 
 ```go
-func GetXxxEchoContext(ctx context.Context) (echo.Context, bool)
+func runtime.GetEchoContext(ctx context.Context) (*echo.Context, bool)
 ```
 
-这样可以在业务层安全获取 `echo.Context`，无需依赖任意项目私有 middleware。
+这样可以在业务层安全获取 `*echo.Context`，无需依赖任意项目私有 middleware。
 
 ## google.api.http 支持
 
@@ -79,6 +81,8 @@ func GetXxxEchoContext(ctx context.Context) (echo.Context, bool)
 | 空（未设置） | 只绑定 path + query 参数 |
 | `*` | path 参数 + 请求体绑定到整个 request message |
 | `"<field>"` | path + query 绑定到 request 其他字段，请求体绑定到指定子消息 |
+
+绑定分别调用 Echo v5 的 `echo.BindPathValues` / `echo.BindQueryParams` / `echo.BindBody`；path 参数按 `param:"xxx"` tag 匹配，可在 proto 字段上用 `@inject_tag: param:"xxx"` 注入。
 
 示例：
 ```protobuf
@@ -232,17 +236,17 @@ e.Validator = &MyValidator{} // 实现 echo.Validator 接口
 
 ### 响应 Header 设置
 
-生成代码提供导出的 helper 函数，允许业务层在 handler 中设置 HTTP 响应头：
+runtime 提供 helper，允许业务层在 handler 中设置 HTTP 响应头：
 
 ```go
-func SetXxxResponseHeader(ctx context.Context, key, value string)
+func runtime.SetResponseHeader(ctx context.Context, key, value string)
 ```
 
 在业务实现中使用：
 
 ```go
 func (s *MyService) GetItem(ctx context.Context, req *GetItemRequest) (*GetItemReply, error) {
-    SetMyServiceResponseHeader(ctx, "X-Custom-Header", "value")
+    runtime.SetResponseHeader(ctx, "X-Custom-Header", "value")
     // ...
 }
 ```

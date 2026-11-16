@@ -89,7 +89,7 @@ func generateFile(gen *protogen.Plugin, file *protogen.File, config generatorCon
 	if needsMime {
 		g.P(`"mime"`)
 	}
-	g.P("echo ", `"github.com/labstack/echo/v4"`)
+	g.P("echo ", `"github.com/labstack/echo/v5"`)
 	if needsEmptyPb {
 		g.P(`"google.golang.org/protobuf/types/known/emptypb"`)
 	}

@@ -56,7 +56,7 @@ func ParseValidationErrors(err error) []DefaultValidationErrorItem {
 	if len(validationErrors) == 0 {
 		rv := reflect.ValueOf(err)
 		// 如果 err 是接口/指针，先取底层值
-		for rv.Kind() == reflect.Ptr || rv.Kind() == reflect.Interface {
+		for rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface {
 			rv = rv.Elem()
 		}
 		if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {

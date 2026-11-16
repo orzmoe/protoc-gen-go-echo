@@ -42,20 +42,10 @@ func collectMethodComments(m *protogen.Method) string {
 	return strings.Join(allComments, "\n")
 }
 
-// isInternalMethod 检查方法注释中是否包含"内部调用"或"不暴露 HTTP 端点"标记。
-// 使用 collectMethodComments 统一收集全部注释源。
-func isInternalMethod(m *protogen.Method) bool {
-	return isInternalFromComments(collectMethodComments(m))
-}
-
 // isInternalFromComments 从已收集的注释字符串中判断是否为内部方法。
 // 独立于 protogen，方便在已有注释文本的场景下避免重复收集。
 func isInternalFromComments(combined string) bool {
 	return strings.Contains(combined, "内部调用") || strings.Contains(combined, "不暴露 HTTP 端点")
-}
-
-func parseMethodComments(m *protogen.Method) (summary, description string) {
-	return parseCommentsContent(collectMethodComments(m))
 }
 
 // parseCommentsContent 从合并后的注释字符串中提取 @summary 和 @description。

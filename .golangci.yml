@@ -1,37 +1,38 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  # gosimple 已并入 staticcheck。
   enable:
     - errcheck
     - govet
     - staticcheck
     - unused
     - ineffassign
-    - gosimple
     - gocritic
     - revive
     - misspell
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true # protoc 插件导出符号由模板决定，不强制注释
+    gocritic:
+      # appendAssign、dupSubExpr、sloppyLen 已默认开启。
+      enabled-checks:
+        - equalFold
+        - unnecessaryBlock
+  exclusions:
+    rules:
+      # 测试文件允许更长的函数和更多 magic number
+      - path: _test\.go
+        linters:
+          - gocritic
+          - revive
+
+formatters:
+  enable:
     - gofmt
     - goimports
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        disabled: true # protoc 插件导出符号由模板决定，不强制注释
-  gocritic:
-    enabled-checks:
-      - appendAssign
-      - dupSubExpr
-      - equalFold
-      - sloppyLen
-      - unnecessaryBlock
-
-issues:
-  exclude-rules:
-    # 测试文件允许更长的函数和更多 magic number
-    - path: _test\.go
-      linters:
-        - gocritic
-        - revive

@@ -78,7 +78,7 @@ import (
 	"testing"
 
 	echoruntime "github.com/orzmoe/protoc-gen-go-echo/runtime"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -114,10 +114,10 @@ func (f *fakeServer) Login(_ context.Context, _ *LoginReq) (*LoginReply, error) 
 
 type allowAllPerm struct{}
 
-func (allowAllPerm) CheckPermission(_ echo.Context, _ string) error { return nil }
-func (allowAllPerm) CheckAllPermissions(_ echo.Context, _ []string) error { return nil }
-func (allowAllPerm) CheckAnyPermission(_ echo.Context, _ []string) error { return nil }
-func (allowAllPerm) CheckAuth(_ echo.Context) error { return nil }
+func (allowAllPerm) CheckPermission(_ *echo.Context, _ string) error { return nil }
+func (allowAllPerm) CheckAllPermissions(_ *echo.Context, _ []string) error { return nil }
+func (allowAllPerm) CheckAnyPermission(_ *echo.Context, _ []string) error { return nil }
+func (allowAllPerm) CheckAuth(_ *echo.Context) error { return nil }
 
 type validatorStub struct {
 	err error

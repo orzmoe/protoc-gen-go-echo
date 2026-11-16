@@ -173,13 +173,13 @@ func TestGenerate_UsesGoPackageAliasForExternalTypes(t *testing.T) {
 
 func TestGenerate_HTTPBodyEmptyUsesPathAndQueryBinding(t *testing.T) {
 	generated := runGenerateProto(t, testBodyQueryOnlyProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "runtime.BindPathParams(ctx, &in)") {
+	if !strings.Contains(generated, "echo.BindPathValues(ctx, &in)") {
 		t.Fatalf("body 为空时应绑定 path 参数，实际输出:\n%s", generated)
 	}
-	if !strings.Contains(generated, "runtime.BindQueryParams(ctx, &in)") {
+	if !strings.Contains(generated, "echo.BindQueryParams(ctx, &in)") {
 		t.Fatalf("body 为空时应绑定 query 参数，实际输出:\n%s", generated)
 	}
-	if strings.Contains(generated, "runtime.BindBody(ctx, &in)") {
+	if strings.Contains(generated, "echo.BindBody(ctx, &in)") {
 		t.Fatalf("body 为空时不应绑定请求体，实际输出:\n%s", generated)
 	}
 	if strings.Contains(generated, "ctx.Bind(&in)") {
@@ -189,13 +189,13 @@ func TestGenerate_HTTPBodyEmptyUsesPathAndQueryBinding(t *testing.T) {
 
 func TestGenerate_HTTPBodyStarUsesPathAndBodyBinding(t *testing.T) {
 	generated := runGenerateProto(t, testBodyFullProto, []string{"paths=source_relative"})
-	if !strings.Contains(generated, "runtime.BindPathParams(ctx, &in)") {
+	if !strings.Contains(generated, "echo.BindPathValues(ctx, &in)") {
 		t.Fatalf("body=* 时应绑定 path 参数，实际输出:\n%s", generated)
 	}
-	if !strings.Contains(generated, "runtime.BindBody(ctx, &in)") {
+	if !strings.Contains(generated, "echo.BindBody(ctx, &in)") {
 		t.Fatalf("body=* 时应绑定请求体，实际输出:\n%s", generated)
 	}
-	if strings.Contains(generated, "runtime.BindQueryParams(ctx, &in)") {
+	if strings.Contains(generated, "echo.BindQueryParams(ctx, &in)") {
 		t.Fatalf("body=* 时不应绑定 query 参数，实际输出:\n%s", generated)
 	}
 }
@@ -622,14 +622,14 @@ message CreateUserReply {
 	if !strings.Contains(code, "in.User = new(") {
 		t.Error("body field 绑定应包含 new() 初始化")
 	}
-	if !strings.Contains(code, "runtime.BindBody(ctx, in.User)") {
-		t.Error("body field 绑定应调用 runtime.BindBody(ctx, in.User)")
+	if !strings.Contains(code, "echo.BindBody(ctx, in.User)") {
+		t.Error("body field 绑定应调用 echo.BindBody(ctx, in.User)")
 	}
 	// 验证仍有 path/query 绑定
-	if !strings.Contains(code, "runtime.BindPathParams(ctx, &in)") {
-		t.Error("body field 绑定应包含 BindPathParams")
+	if !strings.Contains(code, "echo.BindPathValues(ctx, &in)") {
+		t.Error("body field 绑定应包含 BindPathValues")
 	}
-	if !strings.Contains(code, "runtime.BindQueryParams(ctx, &in)") {
+	if !strings.Contains(code, "echo.BindQueryParams(ctx, &in)") {
 		t.Error("body field 绑定应包含 BindQueryParams")
 	}
 }

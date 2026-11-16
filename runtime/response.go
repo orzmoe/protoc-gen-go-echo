@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	echo "github.com/labstack/echo/v4"
+	echo "github.com/labstack/echo/v5"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -51,7 +51,7 @@ type DefaultSuccessResponse struct {
 
 // GetTraceID 从 HTTP 请求中提取 trace ID。
 // 优先读取 X-Trace-ID 请求头，其次读取 echo context 中的 trace_id 值。
-func GetTraceID(ctx echo.Context) string {
+func GetTraceID(ctx *echo.Context) string {
 	if traceID := ctx.Request().Header.Get("X-Trace-ID"); traceID != "" {
 		return traceID
 	}
@@ -64,7 +64,7 @@ func GetTraceID(ctx echo.Context) string {
 }
 
 // GetRequestID 从 HTTP 响应或请求头中提取 request ID。
-func GetRequestID(ctx echo.Context) string {
+func GetRequestID(ctx *echo.Context) string {
 	requestID := ctx.Response().Header().Get(echo.HeaderXRequestID)
 	if requestID == "" {
 		requestID = ctx.Request().Header.Get("X-Request-ID")
@@ -77,7 +77,7 @@ func GetRequestID(ctx echo.Context) string {
 // DefaultWrappedResp 实现 [ResponseWrapper]，使用 {code, msg, data} 包装格式。
 type DefaultWrappedResp struct{}
 
-func (resp DefaultWrappedResp) Error(ctx echo.Context, err error) error {
+func (resp DefaultWrappedResp) Error(ctx *echo.Context, err error) error {
 	code := 500
 	status := 500
 	msg := "Internal Server Error"
@@ -111,7 +111,7 @@ func (resp DefaultWrappedResp) Error(ctx echo.Context, err error) error {
 	return resp.buildErrorResponse(ctx, status, code, msg, err)
 }
 
-func (DefaultWrappedResp) buildErrorResponse(ctx echo.Context, status, code int, msg string, err error) error {
+func (DefaultWrappedResp) buildErrorResponse(ctx *echo.Context, status, code int, msg string, err error) error {
 	if err != nil {
 		ctx.Set("_error", err)
 	}
@@ -136,7 +136,7 @@ func (DefaultWrappedResp) buildErrorResponse(ctx echo.Context, status, code int,
 	return ctx.JSON(status, &r)
 }
 
-func (resp DefaultWrappedResp) ParamsError(ctx echo.Context, err error) error {
+func (resp DefaultWrappedResp) ParamsError(ctx *echo.Context, err error) error {
 	r := DefaultParamsErrorResponse{
 		Code:      400,
 		Msg:       "参数错误",
@@ -159,7 +159,7 @@ func (resp DefaultWrappedResp) ParamsError(ctx echo.Context, err error) error {
 	return ctx.JSON(400, &r)
 }
 
-func (DefaultWrappedResp) Success(ctx echo.Context, data any) error {
+func (DefaultWrappedResp) Success(ctx *echo.Context, data any) error {
 	r := DefaultSuccessResponse{
 		Code: 200,
 		Msg:  "成功",
@@ -180,14 +180,14 @@ func (DefaultWrappedResp) Success(ctx echo.Context, data any) error {
 // Error 和 ParamsError 行为与 [DefaultWrappedResp] 一致。
 type DefaultDirectResp struct{}
 
-func (resp DefaultDirectResp) Error(ctx echo.Context, err error) error {
+func (resp DefaultDirectResp) Error(ctx *echo.Context, err error) error {
 	return DefaultWrappedResp{}.Error(ctx, err)
 }
 
-func (resp DefaultDirectResp) ParamsError(ctx echo.Context, err error) error {
+func (resp DefaultDirectResp) ParamsError(ctx *echo.Context, err error) error {
 	return DefaultWrappedResp{}.ParamsError(ctx, err)
 }
 
-func (DefaultDirectResp) Success(ctx echo.Context, data any) error {
+func (DefaultDirectResp) Success(ctx *echo.Context, data any) error {
 	return ctx.JSON(200, data)
 }
